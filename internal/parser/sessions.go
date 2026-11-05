@@ -81,6 +81,7 @@ type jsonlLine struct {
 	Type      string    `json:"type"`
 	Timestamp time.Time `json:"timestamp"`
 	SessionID string    `json:"sessionId"`
+	UUID      string    `json:"uuid"`
 	CWD       string    `json:"cwd"`
 	Message   *struct {
 		ID      string `json:"id"`
@@ -298,8 +299,7 @@ func enumerateSessionFiles(claudeDir string) ([]sessionFile, error) {
 	// Enumeration is the one place every discovery path passes through, so
 	// piggyback cache eviction of deleted files here.
 	summaryCache.prune(files)
-	dailyCache.prune(files)
-	hourlyCache.prune(files)
+	ledgerCache.prune(files)
 
 	return files, nil
 }
@@ -539,108 +539,17 @@ func FindSessionFile(claudeDir, sessionID string) string {
 // is keyed by "YYYY-MM-DD". Both user and assistant messages contribute to
 // MessageCount on their own date. SessionCount is left at 0 (set by caller).
 func ParseSessionFileDaily(path string) (map[string]*SessionAggregate, error) {
-	f, err := os.Open(path)
+	f, err := singleFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("opening session file: %w", err)
+		return nil, err
 	}
-	defer f.Close()
-
+	if _, err := ledgerCache.get(f, parseSessionLedger); err != nil {
+		return nil, err
+	}
 	buckets := map[string]*SessionAggregate{}
-	var responses responseLog
-	getBucket := func(date string) *SessionAggregate {
-		b := buckets[date]
-		if b == nil {
-			b = &SessionAggregate{}
-			buckets[date] = b
-		}
-		return b
-	}
-
-	scanner := newSessionScanner(f)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var entry jsonlLine
-		if err := json.Unmarshal(line, &entry); err != nil {
-			continue
-		}
-		if entry.Timestamp.IsZero() {
-			continue
-		}
-		date := entry.Timestamp.Local().Format("2006-01-02")
-
-		switch entry.Type {
-		case "assistant":
-			if entry.Message == nil {
-				continue
-			}
-			getBucket(date).MessageCount++
-			responses.add(&entry)
-		case "user":
-			if entry.Message == nil {
-				continue
-			}
-			getBucket(date).MessageCount++
-		}
-	}
-
-	for _, r := range responses.entries {
-		b := getBucket(r.Time.Local().Format("2006-01-02"))
-		b.InputTokens += r.Input
-		b.OutputTokens += r.Output
-		b.CacheReadTokens += r.CacheRead
-		b.CacheCreateTokens += r.CacheCreate
-		b.CostUSD += costFor(r.Model, r.Input, r.Output, r.CacheRead, r.CacheCreate)
-	}
-
-	for date, b := range buckets {
-		b.CostUSD = math.Round(b.CostUSD*10000) / 10000
-		buckets[date] = b
-	}
-	return buckets, nil
-}
-
-// hourlyCache memoizes parseSessionFileHourly results.
-var hourlyCache = newFileCache[map[string][24]int]()
-
-// parseSessionFileHourly buckets a session's assistant token totals (input +
-// output + cache read + cache create) by local date and hour. The returned map
-// is keyed by "YYYY-MM-DD".
-func parseSessionFileHourly(path string) (map[string][24]int, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("opening session file: %w", err)
-	}
-	defer f.Close()
-
-	buckets := map[string][24]int{}
-	var responses responseLog
-	scanner := newSessionScanner(f)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var entry jsonlLine
-		if err := json.Unmarshal(line, &entry); err != nil {
-			continue
-		}
-		if entry.Type != "assistant" || entry.Message == nil || entry.Message.Usage == nil {
-			continue
-		}
-		if entry.Timestamp.IsZero() {
-			continue
-		}
-		responses.add(&entry)
-	}
-	for _, r := range responses.entries {
-		ts := r.Time.Local()
-		date := ts.Format("2006-01-02")
-		hours := buckets[date]
-		hours[ts.Hour()] += r.Input + r.Output + r.CacheRead + r.CacheCreate
-		buckets[date] = hours
+	for date, agg := range dailyAggregates([]sessionFile{f}) {
+		agg.SessionCount = 0
+		buckets[date] = &agg
 	}
 	return buckets, nil
 }
@@ -649,75 +558,27 @@ func parseSessionFileHourly(path string) (map[string][24]int, error) {
 // tokens (input + output + cache read + cache create) from assistant messages
 // whose timestamp fell in local hour i on the current local day. Messages from
 // other days are skipped, even if they belong to a session that was also
-// active today.
+// active today. Responses present in several files are counted once.
 func HourlyTokensToday(claudeDir string) ([24]int, error) {
-	var hours [24]int
 	files, err := enumerateSessionFiles(claudeDir)
 	if err != nil {
-		return hours, err
+		return [24]int{}, err
 	}
-	today := time.Now().Local().Format("2006-01-02")
-	for _, sf := range files {
-		buckets, err := hourlyCache.get(sf, parseSessionFileHourly)
-		if err != nil {
-			continue
-		}
-		for i, v := range buckets[today] {
-			hours[i] += v
-		}
-	}
-	return hours, nil
+	return hourlyTokens(files, localDate(time.Now())), nil
 }
 
-// dailyCache memoizes ParseSessionFileDaily results. Returned bucket maps are
-// shared with the cache; callers must treat them as read-only.
-var dailyCache = newFileCache[map[string]*SessionAggregate]()
-
 // DiscoverDailyAggregates walks all session files and returns aggregates
-// bucketed by message timestamp (local date). SessionCount on each entry is
-// the number of distinct session files that contributed any message on that
+// bucketed by message timestamp (local date). Records present in several
+// files (a session copied to another project directory or collected from
+// several machines) are counted once. SessionCount on each entry is the
+// number of distinct session IDs that contributed a counted record on that
 // date.
 func DiscoverDailyAggregates(claudeDir string) (map[string]SessionAggregate, error) {
 	files, err := enumerateSessionFiles(claudeDir)
 	if err != nil {
 		return nil, err
 	}
-
-	type acc struct {
-		agg      SessionAggregate
-		sessions map[string]bool
-	}
-	perDay := map[string]*acc{}
-
-	for _, f := range files {
-		buckets, err := dailyCache.get(f, ParseSessionFileDaily)
-		if err != nil {
-			continue
-		}
-		sid := strings.TrimSuffix(filepath.Base(f.path), ".jsonl")
-		for date, b := range buckets {
-			a := perDay[date]
-			if a == nil {
-				a = &acc{sessions: map[string]bool{}}
-				perDay[date] = a
-			}
-			a.agg.InputTokens += b.InputTokens
-			a.agg.OutputTokens += b.OutputTokens
-			a.agg.CacheReadTokens += b.CacheReadTokens
-			a.agg.CacheCreateTokens += b.CacheCreateTokens
-			a.agg.CostUSD += b.CostUSD
-			a.agg.MessageCount += b.MessageCount
-			a.sessions[sid] = true
-		}
-	}
-
-	out := make(map[string]SessionAggregate, len(perDay))
-	for date, a := range perDay {
-		a.agg.SessionCount = len(a.sessions)
-		a.agg.CostUSD = math.Round(a.agg.CostUSD*10000) / 10000
-		out[date] = a.agg
-	}
-	return out, nil
+	return dailyAggregates(files), nil
 }
 
 // SessionAggregate holds aggregated token counts and cost across sessions.

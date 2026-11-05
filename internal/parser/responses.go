@@ -4,6 +4,7 @@ import "time"
 
 // apiResponse is the token usage of one assistant API response.
 type apiResponse struct {
+	ID          string // message ID; empty for legacy lines without one
 	Time        time.Time
 	Model       string
 	Input       int
@@ -29,6 +30,7 @@ func (l *responseLog) add(entry *jsonlLine) {
 	}
 	u := entry.Message.Usage
 	r := apiResponse{
+		ID:          entry.Message.ID,
 		Time:        entry.Timestamp,
 		Model:       entry.Message.Model,
 		Input:       u.InputTokens,

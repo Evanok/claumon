@@ -78,15 +78,14 @@ func TestParseSessionFileDailyDedupesResponses(t *testing.T) {
 }
 
 func TestParseSessionFileHourlyDedupesResponses(t *testing.T) {
-	buckets, err := parseSessionFileHourly(writeDupSession(t))
+	f, err := singleFile(writeDupSession(t))
 	if err != nil {
 		t.Fatal(err)
 	}
+	date := time.Date(2026, 3, 20, 10, 0, 0, 0, time.UTC).Local().Format("2006-01-02")
 	var total int
-	for _, hours := range buckets {
-		for _, n := range hours {
-			total += n
-		}
+	for _, n := range hourlyTokens([]sessionFile{f}, date) {
+		total += n
 	}
 	if want := dupIn + dupOut + dupCacheRead + dupCacheCreate; total != want {
 		t.Errorf("hourly total = %d, want %d", total, want)

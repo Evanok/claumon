@@ -23,12 +23,12 @@ Single `main.go` orchestrates 4 goroutines (SSE broker, usage API poller, file w
 
 - **api** — Claude OAuth usage API client with exponential backoff
 - **auth** — Multi-platform credential loading (macOS Keychain, Linux secret-service, Windows Credential Manager)
-- **parser** — Session JSONL discovery and token/cost aggregation
+- **parser** — Session JSONL discovery and token/cost aggregation, with cross-file deduplication (message ID for tokens, line UUID for messages) and optional multi-machine discovery (`SetMachinesDir`, see `MULTI_MACHINE.md`)
 - **pricing** — Layered pricing: embedded JSON → 24h cache → GitHub remote → config overrides
 - **memory** — Memory file discovery, graph building, staleness detection, consolidation scoring
 - **server** — HTTP routes, handlers, SSE broker
 - **store** — SQLite (WAL mode) for usage snapshots and daily aggregates
-- **watcher** — fsnotify-based file watcher with 500ms debounce
+- **watcher** — fsnotify-based file watcher with 500ms debounce; `WatchMachines` adds the multi-machine tree
 
 Frontend is a single `web/index.html` embedded via `//go:embed`. No build step, no external JS deps.
 

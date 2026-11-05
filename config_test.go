@@ -46,7 +46,8 @@ func TestLoadConfigExpandsTildePaths(t *testing.T) {
 	data := `{
 		"claude_dir": "~/claude-sync",
 		"credentials_path": "~/claude-sync/.credentials.json",
-		"db_path": "~/.claumon-test/usage.db"
+		"db_path": "~/.claumon-test/usage.db",
+		"machines_dir": "~/claumon/machines"
 	}`
 	if err := os.WriteFile(configPath, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
@@ -63,11 +64,17 @@ func TestLoadConfigExpandsTildePaths(t *testing.T) {
 	if want := filepath.Join(home, ".claumon-test", "usage.db"); cfg.DBPath != want {
 		t.Errorf("DBPath = %q, want %q", cfg.DBPath, want)
 	}
+	if want := filepath.Join(home, "claumon", "machines"); cfg.MachinesDir != want {
+		t.Errorf("MachinesDir = %q, want %q", cfg.MachinesDir, want)
+	}
 }
 
 func TestLoadConfigMissingFileReturnsDefaults(t *testing.T) {
 	cfg := loadConfigFrom(filepath.Join(t.TempDir(), "missing.json"))
 	if cfg.Port != defaultConfig().Port {
 		t.Errorf("Port = %d, want default %d", cfg.Port, defaultConfig().Port)
+	}
+	if cfg.MachinesDir != "" {
+		t.Errorf("MachinesDir = %q, want empty (single-machine mode by default)", cfg.MachinesDir)
 	}
 }

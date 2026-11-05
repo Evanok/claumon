@@ -46,6 +46,10 @@ type Config struct {
 	// Hostnames a reverse proxy forwards in the Host header. Loopback names
 	// are always accepted; anything else is refused (DNS-rebinding guard).
 	AllowedHosts []string `json:"allowed_hosts,omitempty"`
+	// Optional root of session data collected from other machines, laid out
+	// as <machines_dir>/<machine>/projects/<project>/*.jsonl. Empty means
+	// single-machine mode.
+	MachinesDir string `json:"machines_dir,omitempty"`
 }
 
 func defaultConfig() Config {
@@ -102,6 +106,7 @@ func loadConfigFrom(configPath string) Config {
 	cfg.ClaudeDir = expandHome(cfg.ClaudeDir, home)
 	cfg.CredentialsPath = expandHome(cfg.CredentialsPath, home)
 	cfg.DBPath = expandHome(cfg.DBPath, home)
+	cfg.MachinesDir = expandHome(cfg.MachinesDir, home)
 	return cfg
 }
 
@@ -148,6 +153,7 @@ func main() {
 	openBrowser := flag.Bool("open", false, "Open dashboard in browser on startup")
 	portOverride := flag.Int("port", 0, "override dashboard port (default from config)")
 	dbOverride := flag.String("db", "", "override DB path (e.g. a copy, to run a test instance without touching the real DB)")
+	machinesOverride := flag.String("machines-dir", "", "aggregate session files collected from other machines under this directory (see MULTI_MACHINE.md)")
 	flag.Parse()
 	cfg := loadConfig()
 	if *portOverride != 0 {
@@ -156,8 +162,16 @@ func main() {
 	if *dbOverride != "" {
 		cfg.DBPath = *dbOverride
 	}
+	if *machinesOverride != "" {
+		home, _ := os.UserHomeDir()
+		cfg.MachinesDir = expandHome(*machinesOverride, home)
+	}
 
 	log.Printf("[startup] claumon starting — port=%d claude_dir=%s", cfg.Port, cfg.ClaudeDir)
+	if cfg.MachinesDir != "" {
+		log.Printf("[startup] multi-machine mode — machines_dir=%s", cfg.MachinesDir)
+		parser.SetMachinesDir(cfg.MachinesDir)
+	}
 
 	// Load pricing table (embedded → cache → remote → config overrides)
 	pricingTable := pricing.Load(cfg.PricingOverrides)
@@ -220,6 +234,11 @@ func main() {
 	if err != nil {
 		log.Printf("[watcher] Failed to start: %v", err)
 	} else {
+		if cfg.MachinesDir != "" {
+			if err := w.WatchMachines(cfg.MachinesDir); err != nil {
+				log.Printf("[watcher] Machines directory not watched: %v", err)
+			}
+		}
 		stuckThreshold := time.Duration(cfg.StuckThresholdMins) * time.Minute
 		w.OnSessionChange(func(path string) {
 			log.Printf("[watcher] Session changed: %s", filepath.Base(path))

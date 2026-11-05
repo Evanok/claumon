@@ -16,6 +16,7 @@ import (
 type Watcher struct {
 	fsw             *fsnotify.Watcher
 	claudeDir       string
+	machinesDir     string // set by WatchMachines; empty in single-machine mode
 	onSessionChange func(path string)
 	onMemoryChange  func(path string)
 }
@@ -109,6 +110,11 @@ func (w *Watcher) Start(ctx context.Context) error {
 			// it is bookkeeping, not a memory change, and watching its record
 			// dirs would leak one watch per deletion until pruning.
 			if w.inTrash(event.Name) {
+				continue
+			}
+
+			// The machines tree has its own layout rules (see machines.go).
+			if w.handleMachinesEvent(event.Name, event.Op&fsnotify.Create != 0, deb.trigger) {
 				continue
 			}
 

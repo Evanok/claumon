@@ -39,6 +39,9 @@ type SessionSummary struct {
 	EstimatedCostUSD  float64   `json:"estimated_cost_usd"`
 	MessageCount      int       `json:"message_count"`
 	CWD               string    `json:"cwd"`
+	// Machine is the machine the session file was collected from; empty for
+	// the local machine, so single-machine API output is unchanged.
+	Machine         string    `json:"machine,omitempty"`
 	HasFileEdits    bool      `json:"has_file_edits"`
 	CacheEfficiency float64   `json:"cache_efficiency"`
 	WasteFlags      []string  `json:"waste_flags"`
@@ -258,25 +261,57 @@ func normalizeModel(model string) string {
 type sessionFile struct {
 	path    string
 	project string
+	machine string // "" for the local machine
 	modTime time.Time
 	size    int64
 }
 
 // enumerateSessionFiles walks claudeDir/projects/*/ for *.jsonl and returns
 // their paths, decoded project names, and mtimes. Stat failures are skipped silently.
+//
+// When a machines directory is set (SetMachinesDir), every
+// <machinesDir>/<machine>/projects/*/ is walked too and its files are tagged
+// with that machine. In that mode a missing local projects directory is not
+// an error, since a server aggregating other machines may not run Claude Code
+// itself; an error is returned only when no projects directory is readable.
 func enumerateSessionFiles(claudeDir string) ([]sessionFile, error) {
-	projectsDir := filepath.Join(claudeDir, "projects")
-	entries, err := os.ReadDir(projectsDir)
-	if err != nil {
-		return nil, fmt.Errorf("reading projects directory: %w", err)
+	var files []sessionFile
+	var firstErr error
+	readable := 0
+	for _, root := range projectsRoots(claudeDir) {
+		entries, err := os.ReadDir(root.dir)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("reading projects directory: %w", err)
+			}
+			continue
+		}
+		readable++
+		files = appendProjectFiles(files, root, entries)
+	}
+	// Without a machines directory there is a single root, so this keeps the
+	// historical "missing projects directory is an error" behavior.
+	if readable == 0 {
+		return nil, firstErr
 	}
 
-	var files []sessionFile
+	// Enumeration is the one place every discovery path passes through, so
+	// piggyback cache eviction of deleted files here.
+	summaryCache.prune(files)
+	dailyCache.prune(files)
+	hourlyCache.prune(files)
+
+	return files, nil
+}
+
+// appendProjectFiles appends the *.jsonl files of each project directory in
+// entries (the listing of root.dir) to files.
+func appendProjectFiles(files []sessionFile, root projectsRoot, entries []os.DirEntry) []sessionFile {
 	for _, projEntry := range entries {
 		if !projEntry.IsDir() {
 			continue
 		}
-		projPath := filepath.Join(projectsDir, projEntry.Name())
+		projPath := filepath.Join(root.dir, projEntry.Name())
 		projName := memory.DecodePath(projEntry.Name())
 
 		matches, err := filepath.Glob(filepath.Join(projPath, "*.jsonl"))
@@ -288,17 +323,16 @@ func enumerateSessionFiles(claudeDir string) ([]sessionFile, error) {
 			if err != nil {
 				continue
 			}
-			files = append(files, sessionFile{path: f, project: projName, modTime: info.ModTime(), size: info.Size()})
+			files = append(files, sessionFile{
+				path:    f,
+				project: projName,
+				machine: root.machine,
+				modTime: info.ModTime(),
+				size:    info.Size(),
+			})
 		}
 	}
-
-	// Enumeration is the one place every discovery path passes through, so
-	// piggyback cache eviction of deleted files here.
-	summaryCache.prune(files)
-	dailyCache.prune(files)
-	hourlyCache.prune(files)
-
-	return files, nil
+	return files
 }
 
 // summaryCache memoizes ParseSessionFile results. Summaries are stored by
@@ -338,6 +372,7 @@ func parseSessionFiles(files []sessionFile) []*SessionSummary {
 		}
 		s := val // copy out of the cache before mutating
 		s.Project = f.project
+		s.Machine = f.machine
 		sessions = append(sessions, &s)
 	}
 	return sessions
@@ -477,20 +512,23 @@ func ParseSessionDetail(path string) ([]SessionMessage, error) {
 	return messages, nil
 }
 
-// FindSessionFile finds the JSONL file for a session ID.
+// FindSessionFile finds the JSONL file for a session ID. The local projects
+// directory is searched first, then each machine (see SetMachinesDir); the
+// first match wins.
 func FindSessionFile(claudeDir, sessionID string) string {
-	projectsDir := filepath.Join(claudeDir, "projects")
-	entries, err := os.ReadDir(projectsDir)
-	if err != nil {
-		return ""
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
+	for _, root := range projectsRoots(claudeDir) {
+		entries, err := os.ReadDir(root.dir)
+		if err != nil {
 			continue
 		}
-		path := filepath.Join(projectsDir, e.Name(), sessionID+".jsonl")
-		if _, err := os.Stat(path); err == nil {
-			return path
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			path := filepath.Join(root.dir, e.Name(), sessionID+".jsonl")
+			if _, err := os.Stat(path); err == nil {
+				return path
+			}
 		}
 	}
 	return ""

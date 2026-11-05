@@ -61,8 +61,11 @@ func defaultConfig() Config {
 }
 
 func loadConfig() Config {
+	return loadConfigFrom(filepath.Join(filepath.Dir(defaultConfig().DBPath), "config.json"))
+}
+
+func loadConfigFrom(configPath string) Config {
 	cfg := defaultConfig()
-	configPath := filepath.Join(filepath.Dir(cfg.DBPath), "config.json")
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -93,7 +96,28 @@ func loadConfig() Config {
 	if cfg.StuckThresholdMins == 0 {
 		cfg.StuckThresholdMins = 10
 	}
+
+	// The README documents paths like "~/.claude"; Go does not expand them.
+	home, _ := os.UserHomeDir()
+	cfg.ClaudeDir = expandHome(cfg.ClaudeDir, home)
+	cfg.CredentialsPath = expandHome(cfg.CredentialsPath, home)
+	cfg.DBPath = expandHome(cfg.DBPath, home)
 	return cfg
+}
+
+// expandHome replaces a leading "~" path element with home. Paths such as
+// "~user/x" or "a/~/b" are returned unchanged.
+func expandHome(path, home string) string {
+	if home == "" || path == "" || path[0] != '~' {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	if path[1] == '/' || path[1] == filepath.Separator {
+		return filepath.Join(home, path[2:])
+	}
+	return path
 }
 
 var version = "dev"

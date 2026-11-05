@@ -213,6 +213,8 @@ func main() {
 		go pollUsage(ctx, apiClient, provider, st, srv.Broker, srv.Handlers, fcSvc, fcReady, time.Duration(cfg.PollIntervalSecs)*time.Second)
 	}
 
+	aggSync := newDailyAggregateSync(cfg.ClaudeDir, st)
+
 	// Start file watcher
 	w, err := watcher.New(cfg.ClaudeDir)
 	if err != nil {
@@ -226,8 +228,8 @@ func main() {
 				parser.EnrichSessionsWithProcessStatus(sessions, cfg.ClaudeDir, stuckThreshold)
 				srv.Broker.SendJSON("sessions", sessions)
 			}
-			// Update daily aggregate
-			updateDailyAggregate(cfg.ClaudeDir, st)
+			// Update today and any past day the change touched
+			aggSync.sync()
 		})
 
 		w.OnMemoryChange(func(path string) {
@@ -261,17 +263,16 @@ func main() {
 		}
 	}()
 
-	// Historical backfill and initial prune (runs once at startup, in background)
+	// Historical backfill: the first sync writes every day found in the
+	// session files, so today's row is in the store before serving. The
+	// background prune then drops days past retention.
+	aggSync.sync()
 	go func() {
-		backfillHistory(cfg.ClaudeDir, st)
 		if err := st.Prune(cfg.RetentionDays); err != nil {
 			log.Printf("[prune] Error: %v", err)
 		}
 		pruneMemoryTrash(cfg.ClaudeDir)
 	}()
-
-	// Initial daily aggregate
-	updateDailyAggregate(cfg.ClaudeDir, st)
 
 	// HTTP server
 	httpServer := &http.Server{
@@ -667,52 +668,6 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh %dm", h, m)
 	}
 	return fmt.Sprintf("%dm", m)
-}
-
-func toStoreAggregate(date string, a parser.SessionAggregate) store.DailyAggregate {
-	return store.DailyAggregate{
-		Date:              date,
-		InputTokens:       a.InputTokens,
-		OutputTokens:      a.OutputTokens,
-		CacheReadTokens:   a.CacheReadTokens,
-		CacheCreateTokens: a.CacheCreateTokens,
-		CostUSD:           a.CostUSD,
-		SessionCount:      a.SessionCount,
-		MessageCount:      a.MessageCount,
-	}
-}
-
-func updateDailyAggregate(claudeDir string, st *store.Store) {
-	daily, err := parser.DiscoverDailyAggregates(claudeDir)
-	if err != nil {
-		log.Printf("[aggregate] Failed to compute daily aggregates: %v", err)
-		return
-	}
-	today := time.Now().Format("2006-01-02")
-	if err := st.UpsertDailyAggregate(toStoreAggregate(today, daily[today])); err != nil {
-		log.Printf("[aggregate] Failed to upsert daily aggregate: %v", err)
-	}
-}
-
-func backfillHistory(claudeDir string, st *store.Store) {
-	log.Printf("[backfill] Scanning all sessions for historical data...")
-
-	daily, err := parser.DiscoverDailyAggregates(claudeDir)
-	if err != nil {
-		log.Printf("[backfill] Error computing daily aggregates: %v", err)
-		return
-	}
-
-	count := 0
-	for date, agg := range daily {
-		if err := st.UpsertDailyAggregate(toStoreAggregate(date, agg)); err != nil {
-			log.Printf("[backfill] Failed to upsert aggregate for %s: %v", date, err)
-			continue
-		}
-		count++
-	}
-
-	log.Printf("[backfill] Done: %d days", count)
 }
 
 func runUpdate() {

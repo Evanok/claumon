@@ -42,6 +42,8 @@ type SessionSummary struct {
 	// Machine is the machine the session file was collected from; empty for
 	// the local machine, so single-machine API output is unchanged.
 	Machine         string    `json:"machine,omitempty"`
+	// Machines lists the named machines holding a copy of the session.
+	Machines        []string  `json:"machines,omitempty"`
 	HasFileEdits    bool      `json:"has_file_edits"`
 	CacheEfficiency float64   `json:"cache_efficiency"`
 	WasteFlags      []string  `json:"waste_flags"`
@@ -362,9 +364,13 @@ func parseSessionFileCached(path string) (SessionSummary, error) {
 		parseSummaryByValue)
 }
 
-// parseSessionFiles parses each file and returns the non-empty summaries with project tagged.
+// parseSessionFiles parses each file and returns one summary per session,
+// with project and machine tagged. Files sharing a session ID are merged (see
+// mergeSessionCopies); empty files are skipped. Sessions are returned in the
+// order their first file appears in files.
 func parseSessionFiles(files []sessionFile) []*SessionSummary {
-	var sessions []*SessionSummary
+	groups := map[string][]sessionCopy{}
+	var order []string
 	for _, f := range files {
 		val, err := summaryCache.get(f, parseSummaryByValue)
 		if err != nil || val.MessageCount == 0 {
@@ -373,6 +379,15 @@ func parseSessionFiles(files []sessionFile) []*SessionSummary {
 		s := val // copy out of the cache before mutating
 		s.Project = f.project
 		s.Machine = f.machine
+		if _, ok := groups[s.ID]; !ok {
+			order = append(order, s.ID)
+		}
+		groups[s.ID] = append(groups[s.ID], sessionCopy{file: f, summary: s})
+	}
+
+	sessions := make([]*SessionSummary, 0, len(order))
+	for _, id := range order {
+		s := mergeSessionCopies(groups[id])
 		sessions = append(sessions, &s)
 	}
 	return sessions
@@ -386,8 +401,10 @@ func DiscoverSessions(claudeDir string) ([]*SessionSummary, error) {
 	return parseSessionFiles(files), nil
 }
 
-// DiscoverRecentSessions returns at most limit sessions, sorted by file modification time.
-// This avoids parsing all JSONL files by only parsing the most recently modified ones.
+// DiscoverRecentSessions returns at most limit sessions, most recent activity
+// first. This avoids parsing all JSONL files by only parsing the most recently
+// modified ones, plus the other copies of the same sessions so that their
+// merged totals are complete.
 func DiscoverRecentSessions(claudeDir string, limit int) ([]*SessionSummary, error) {
 	files, err := enumerateSessionFiles(claudeDir)
 	if err != nil {
@@ -398,9 +415,26 @@ func DiscoverRecentSessions(claudeDir string, limit int) ([]*SessionSummary, err
 		return files[i].modTime.After(files[j].modTime)
 	})
 	if len(files) > limit {
-		files = files[:limit]
+		recent := map[string]bool{}
+		for _, f := range files[:limit] {
+			recent[sessionIDFromPath(f.path)] = true
+		}
+		selected := files[:limit:limit]
+		for _, f := range files[limit:] {
+			if recent[sessionIDFromPath(f.path)] {
+				selected = append(selected, f)
+			}
+		}
+		files = selected
 	}
-	return parseSessionFiles(files), nil
+	sessions := parseSessionFiles(files)
+	sort.SliceStable(sessions, func(i, j int) bool {
+		return sessions[i].LastActivity.After(sessions[j].LastActivity)
+	})
+	if len(sessions) > limit {
+		sessions = sessions[:limit]
+	}
+	return sessions, nil
 }
 
 // DiscoverTodaySessions returns only sessions with activity today.
@@ -512,10 +546,11 @@ func ParseSessionDetail(path string) ([]SessionMessage, error) {
 	return messages, nil
 }
 
-// FindSessionFile finds the JSONL file for a session ID. The local projects
-// directory is searched first, then each machine (see SetMachinesDir); the
-// first match wins.
+// FindSessionFile finds the JSONL file for a session ID, searching the local
+// projects directory and each machine (see SetMachinesDir). When the session
+// has several copies, the most complete one is returned (see primaryCopy).
 func FindSessionFile(claudeDir, sessionID string) string {
+	var copies []sessionCopy
 	for _, root := range projectsRoots(claudeDir) {
 		entries, err := os.ReadDir(root.dir)
 		if err != nil {
@@ -525,13 +560,19 @@ func FindSessionFile(claudeDir, sessionID string) string {
 			if !e.IsDir() {
 				continue
 			}
-			path := filepath.Join(root.dir, e.Name(), sessionID+".jsonl")
-			if _, err := os.Stat(path); err == nil {
-				return path
+			f, err := singleFile(filepath.Join(root.dir, e.Name(), sessionID+".jsonl"))
+			if err != nil {
+				continue
 			}
+			// An unparsable copy still competes, with a zero summary.
+			s, _ := summaryCache.get(f, parseSummaryByValue)
+			copies = append(copies, sessionCopy{file: f, summary: s})
 		}
 	}
-	return ""
+	if len(copies) == 0 {
+		return ""
+	}
+	return copies[primaryCopy(copies)].file.path
 }
 
 // ParseSessionFileDaily parses a session JSONL and buckets each assistant

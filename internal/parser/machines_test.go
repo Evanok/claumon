@@ -178,7 +178,8 @@ func TestFindSessionFileMachines(t *testing.T) {
 		{"local without machines", "", "local1", filepath.Join(claude, "projects", "-home-a-proj", "local1.jsonl")},
 		{"remote hidden without machines", "", "remote1", ""},
 		{"remote with machines", machines, "remote1", filepath.Join(machines, "office", "projects", "-home-a-proj", "remote1.jsonl")},
-		{"local copy wins", machines, "both", filepath.Join(claude, "projects", "-home-a-proj", "both.jsonl")},
+		// Identical copies tie on activity and size; the smaller path wins.
+		{"identical copies resolve by path", machines, "both", filepath.Join(claude, "projects", "-home-a-proj", "both.jsonl")},
 		{"unknown id", machines, "nope", ""},
 	}
 	for _, tt := range tests {

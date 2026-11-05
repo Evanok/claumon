@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -147,7 +145,7 @@ func dailyAggregates(files []sessionFile) map[string]SessionAggregate {
 			a = &acc{sessions: map[string]bool{}}
 			perDay[date] = a
 		}
-		a.sessions[strings.TrimSuffix(filepath.Base(f.path), ".jsonl")] = true
+		a.sessions[sessionIDFromPath(f.path)] = true
 		return &a.agg
 	}
 

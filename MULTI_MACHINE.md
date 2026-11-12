@@ -100,6 +100,21 @@ history while claumon runs. A day whose recomputed message count is lower
 than the stored one is left as stored: some of its transcripts were deleted
 (Claude Code removes old ones), and the store keeps the history.
 
+## History per machine
+
+claumon also stores the daily totals of each machine (table
+`daily_machine_aggregates`), kept like the overall history and for the same
+`retention_days`. In the dashboard a machine selector next to the history
+window narrows both daily charts to one machine, and another one narrows the
+session list. The API offers `GET /api/machines` (machines with stored
+history) and `GET /api/history?days=N&machine=<name>`.
+
+A record present on several machines counts for the machine whose copy was
+modified first, so the machines of a day add up to the day's total. History
+is stored under the name shown at the time: renaming a machine with
+`machine_aliases` starts a new history under the new name, and the old name
+stays in the list until its days expire.
+
 ## Limitations
 
 - Usage gauges (rate limits) come from the credentials of the machine claumon

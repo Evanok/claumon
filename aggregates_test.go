@@ -303,6 +303,20 @@ func TestDailyAggregateSyncMachines(t *testing.T) {
 			[]string{d2 + "/work"},
 		},
 		{
+			"an older copy of a session arrives from another machine: its records move",
+			func(t *testing.T) {
+				// s1 ran on "home" first: its copy there is older than the
+				// laptop's, so s1's records now count for home.
+				home := filepath.Join(machines, "home")
+				p := writeTranscript(t, home, "-p", "s1", exchange("1", localNoon(2), 10))
+				old := time.Now().Add(-48 * time.Hour)
+				if err := os.Chtimes(p, old, old); err != nil {
+					t.Fatal(err)
+				}
+			},
+			[]string{d2 + "/home", d2 + "/laptop"},
+		},
+		{
 			"a machine's transcript deleted: its stored days are kept",
 			func(t *testing.T) {
 				if err := os.Remove(s2); err != nil {

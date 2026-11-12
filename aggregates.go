@@ -37,6 +37,13 @@ type aggregateStore interface {
 // so the stored totals are kept. A row whose message count is unchanged or
 // higher is rewritten, so added records (late files, subagent transcripts)
 // and price changes are applied.
+//
+// A machine's row can also lose records without any deletion: a record
+// found on several machines counts for the copy modified first, so a copy
+// arriving later with an older modification time moves records between
+// machines. Machine rows therefore keep their stored totals only on days
+// whose overall total lost messages too, and a stored machine row that no
+// longer has any record is reset to zero when its day is otherwise intact.
 type dailyAggregateSync struct {
 	claudeDir string
 	st        aggregateStore
@@ -75,12 +82,13 @@ const (
 )
 
 // update applies the sync rules to one row, calling write when the row must
-// be written.
-func (r *aggregateRows[K]) update(key K, agg parser.SessionAggregate, write func() error) rowUpdate {
+// be written. keepLower keeps the stored totals of a row whose message count
+// went down.
+func (r *aggregateRows[K]) update(key K, agg parser.SessionAggregate, keepLower bool, write func() error) rowUpdate {
 	if prev, ok := r.written[key]; ok && prev == agg {
 		return rowUnchanged
 	}
-	if stored, ok := r.stored[key]; ok && agg.MessageCount < stored {
+	if stored, ok := r.stored[key]; ok && keepLower && agg.MessageCount < stored {
 		r.written[key] = agg
 		return rowKept
 	}
@@ -100,16 +108,26 @@ func (s *dailyAggregateSync) sync() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	count := s.syncDays()
-	s.syncMachineDays()
+	count, days := s.syncDays()
+	if days != nil {
+		// Without the day totals, deleted transcripts could lower machine
+		// rows; they wait for the next sync.
+		s.syncMachineDays(days)
+	}
 	return count
 }
 
-func (s *dailyAggregateSync) syncDays() int {
+// dayStatus tells, per computed day, whether its transcripts were partly
+// deleted (fewer messages than stored).
+type dayStatus map[string]bool
+
+// syncDays writes the changed days of daily_aggregates. It returns how many
+// were written and the status of every computed day, nil when it failed.
+func (s *dailyAggregateSync) syncDays() (int, dayStatus) {
 	daily, err := parser.DiscoverDailyAggregates(s.claudeDir)
 	if err != nil {
 		log.Printf("[aggregate] Failed to compute daily aggregates: %v", err)
-		return 0
+		return 0, nil
 	}
 
 	first := s.days == nil
@@ -119,7 +137,7 @@ func (s *dailyAggregateSync) syncDays() int {
 			// Without the stored counts days could be lowered; retry on the
 			// next sync.
 			log.Printf("[aggregate] Failed to read stored aggregates: %v", err)
-			return 0
+			return 0, nil
 		}
 		s.days = newAggregateRows(stored)
 	}
@@ -132,10 +150,13 @@ func (s *dailyAggregateSync) syncDays() int {
 
 	today := time.Now().Format("2006-01-02")
 	var pastDays, kept []string
+	days := make(dayStatus, len(dates))
 	count := 0
 	for _, date := range dates {
 		agg := daily[date]
-		switch s.days.update(date, agg, func() error {
+		stored, ok := s.days.stored[date]
+		days[date] = ok && agg.MessageCount < stored
+		switch s.days.update(date, agg, true, func() error {
 			return s.st.UpsertDailyAggregate(toStoreAggregate(date, agg))
 		}) {
 		case rowKept:
@@ -157,12 +178,14 @@ func (s *dailyAggregateSync) syncDays() int {
 	if len(kept) > 0 {
 		log.Printf("[aggregate] Kept stored totals of %d days whose transcripts were partly deleted: %s", len(kept), dateList(kept))
 	}
-	return count
+	return count, days
 }
 
 // syncMachineDays writes the changed per-machine rows; a no-op in
-// single-machine mode.
-func (s *dailyAggregateSync) syncMachineDays() {
+// single-machine mode. Rows of partly deleted days keep their stored totals
+// when they lost messages; stored rows left without records on an intact
+// day are reset to zero.
+func (s *dailyAggregateSync) syncMachineDays(days dayStatus) {
 	perMachine, err := parser.DiscoverMachineDailyAggregates(s.claudeDir)
 	if err != nil {
 		log.Printf("[aggregate] Failed to compute machine aggregates: %v", err)
@@ -187,6 +210,12 @@ func (s *dailyAggregateSync) syncMachineDays() {
 			keys = append(keys, store.MachineDay{Date: date, Machine: machine})
 		}
 	}
+	for k := range s.machineDays.stored {
+		partlyDeleted, present := days[k.Date]
+		if _, computed := perMachine[k.Date][k.Machine]; present && !partlyDeleted && !computed {
+			keys = append(keys, k) // its records moved to another machine
+		}
+	}
 	sort.Slice(keys, func(i, j int) bool {
 		if keys[i].Date != keys[j].Date {
 			return keys[i].Date < keys[j].Date
@@ -197,7 +226,7 @@ func (s *dailyAggregateSync) syncMachineDays() {
 	var kept []string
 	for _, k := range keys {
 		agg := perMachine[k.Date][k.Machine]
-		if s.machineDays.update(k, agg, func() error {
+		if s.machineDays.update(k, agg, days[k.Date], func() error {
 			return s.st.UpsertMachineDailyAggregate(k.Machine, toStoreAggregate(k.Date, agg))
 		}) == rowKept {
 			kept = append(kept, k.Date+"/"+k.Machine)

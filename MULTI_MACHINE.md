@@ -104,10 +104,18 @@ than the stored one is left as stored: some of its transcripts were deleted
 
 claumon also stores the daily totals of each machine (table
 `daily_machine_aggregates`), kept like the overall history and for the same
-`retention_days`. In the dashboard a machine selector next to the history
-window narrows both daily charts to one machine, and another one narrows the
-session list. The API offers `GET /api/machines` (machines with stored
-history) and `GET /api/history?days=N&machine=<name>`.
+`retention_days`.
+
+In the dashboard, the Machine selector in the top bar narrows the whole page
+to one machine: today's cards, the hourly heatmap, the daily charts, the
+session list, the stored transcripts, and the running processes (shown only
+for the machine claumon runs on). The usage gauges belong to the Claude
+account, shared by all machines, and are not filtered.
+
+The API offers `GET /api/machines` (machines with stored history) and a
+`machine` parameter on `GET /api/today`, `GET /api/heatmap`,
+`GET /api/history` and `GET /api/sessions`. `GET /api/info` reports the
+local machine's name as `local_machine`.
 
 A record present on several machines counts for the machine whose copy was
 modified first, so the machines of a day add up to the day's total. History

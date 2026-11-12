@@ -82,6 +82,9 @@ func migrate(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("running migrations: %w", err)
 	}
+	if err := migrateMachines(db); err != nil {
+		return fmt.Errorf("running machine migrations: %w", err)
+	}
 	if err := canonicalizeResetAts(db); err != nil {
 		return fmt.Errorf("canonicalizing reset_at: %w", err)
 	}
@@ -240,6 +243,14 @@ func (s *Store) Prune(retentionDays int) error {
 
 	if snapshots > 0 || aggregates > 0 {
 		log.Printf("[prune] Removed %d snapshots and %d aggregates older than %s", snapshots, aggregates, cutoff)
+	}
+
+	machineRows, err := s.pruneMachines(cutoff)
+	if err != nil {
+		return err
+	}
+	if machineRows > 0 {
+		log.Printf("[prune] Removed %d machine aggregates older than %s", machineRows, cutoff)
 	}
 	return nil
 }

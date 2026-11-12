@@ -511,14 +511,23 @@ func DiscoverRecentSessions(claudeDir string, limit int) ([]*SessionSummary, err
 	return sessions, nil
 }
 
-// DiscoverTodaySessions returns only sessions with activity today.
+// startOfDay returns midnight of t's day in t's location. Unlike
+// t.Truncate(24*time.Hour), which cuts at midnight UTC, it follows the
+// local calendar day the daily aggregates use.
+func startOfDay(t time.Time) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, t.Location())
+}
+
+// DiscoverTodaySessions returns only sessions with activity today, since
+// local midnight like the daily aggregates.
 func DiscoverTodaySessions(claudeDir string) ([]*SessionSummary, error) {
 	all, err := DiscoverSessions(claudeDir)
 	if err != nil {
 		return nil, err
 	}
 
-	today := time.Now().Truncate(24 * time.Hour)
+	today := startOfDay(time.Now())
 	var result []*SessionSummary
 	for _, s := range all {
 		if s.LastActivity.After(today) || s.StartTime.After(today) {

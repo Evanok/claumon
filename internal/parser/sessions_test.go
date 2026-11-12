@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/fabioconcina/claumon/internal/pricing"
 )
@@ -397,3 +398,31 @@ func TestParseSessionDetailToolResultPairing(t *testing.T) {
 	}
 }
 
+
+func TestStartOfDay(t *testing.T) {
+	montreal := time.FixedZone("UTC-5", -5*3600)
+	paris := time.FixedZone("UTC+1", 3600)
+	tests := []struct {
+		name string
+		in   time.Time
+		want time.Time
+	}{
+		// Evening west of UTC: the UTC day has already changed, the local
+		// day has not.
+		{"evening west of UTC", time.Date(2026, 11, 12, 20, 0, 0, 0, montreal), time.Date(2026, 11, 12, 0, 0, 0, 0, montreal)},
+		// Just after local midnight east of UTC: still the previous UTC day.
+		{"after midnight east of UTC", time.Date(2026, 11, 12, 0, 30, 0, 0, paris), time.Date(2026, 11, 12, 0, 0, 0, 0, paris)},
+		{"UTC", time.Date(2026, 11, 12, 23, 59, 0, 0, time.UTC), time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := startOfDay(tt.in)
+			if !got.Equal(tt.want) {
+				t.Errorf("startOfDay(%v) = %v, want %v", tt.in, got, tt.want)
+			}
+			if trunc := tt.in.Truncate(24 * time.Hour); tt.in.Location() != time.UTC && trunc.Equal(tt.want) {
+				t.Errorf("case does not tell local midnight from UTC truncation")
+			}
+		})
+	}
+}

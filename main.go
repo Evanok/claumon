@@ -54,6 +54,9 @@ type Config struct {
 	// machine name: the hostname for the local machine, the subdirectory
 	// name under machines_dir for the others.
 	MachineAliases map[string]string `json:"machine_aliases,omitempty"`
+	// Disk space machines_dir may use before the dashboard warns, in MB.
+	// 0 means no limit. Nothing is ever deleted.
+	MaxStorageMB int `json:"max_storage_mb,omitempty"`
 }
 
 // localMachineName names the machine claumon runs on in multi-machine mode:
@@ -215,6 +218,16 @@ func main() {
 	srv.Handlers.RateLimitTier = creds.RateLimitTier
 	srv.Handlers.StuckThreshold = time.Duration(cfg.StuckThresholdMins) * time.Minute
 	srv.Handlers.HistoryMaxDays = cfg.RetentionDays
+	srv.Handlers.MaxStorageMB = cfg.MaxStorageMB
+	if cfg.MachinesDir != "" {
+		if report, err := srv.Handlers.StorageReport(); err != nil {
+			log.Printf("[storage] Failed to measure %s: %v", cfg.MachinesDir, err)
+		} else if report.OverLimit {
+			log.Printf("[storage] machines_dir uses %d MB, above max_storage_mb (%d MB)", report.TotalBytes/(1024*1024), cfg.MaxStorageMB)
+		} else {
+			log.Printf("[storage] machines_dir uses %d MB", report.TotalBytes/(1024*1024))
+		}
+	}
 
 	// Forecast service: prior + calibration cached, refit daily. The fit only
 	// reads completed past sessions, so we can kick it off immediately; on a

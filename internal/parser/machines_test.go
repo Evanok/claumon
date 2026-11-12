@@ -323,3 +323,52 @@ func TestDiscoverMachineDailyAggregates(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoverMachineStorage(t *testing.T) {
+	setMachinesDirForTest(t, "")
+	if got, err := DiscoverMachineStorage(); err != nil || got != nil {
+		t.Fatalf("single-machine mode: got %v, %v; want nil, nil", got, err)
+	}
+
+	machines := filepath.Join(t.TempDir(), "machines")
+	write := func(rel string, size int) {
+		t.Helper()
+		path := filepath.Join(machines, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, make([]byte, size), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("office/projects/-p/s1.jsonl", 100)
+	write("office/projects/-p/s1/subagents/a.jsonl", 20)
+	write("office/settings.json", 3) // not read by claumon, still stored
+	write("wsl-old/projects/-p/s2.jsonl", 40)
+	write("wsl-new/projects/-p/s3.jsonl", 50)
+	write(".tmp/projects/-p/s4.jsonl", 1000) // hidden: skipped
+	write("stray.txt", 7)                    // not a machine directory
+	if err := os.MkdirAll(filepath.Join(machines, "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	setMachinesDirForTest(t, machines)
+	setMachineNamesForTest(t, "laptop", map[string]string{"wsl-old": "home", "wsl-new": "home"})
+
+	got, err := DiscoverMachineStorage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []MachineStorage{
+		{Machine: "empty", Bytes: 0, Files: 0},
+		{Machine: "home", Bytes: 90, Files: 2},
+		{Machine: "office", Bytes: 123, Files: 3},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("machine %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}

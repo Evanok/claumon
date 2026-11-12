@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/fabioconcina/claumon/internal/forecast"
+	"github.com/fabioconcina/claumon/internal/parser"
 	"github.com/fabioconcina/claumon/internal/store"
 )
 
@@ -320,6 +321,58 @@ func TestHandleMachineHistory(t *testing.T) {
 		}
 		if got := history[6].InputTokens; got != tt.want {
 			t.Errorf("%q: today input = %d, want %d", tt.query, got, tt.want)
+		}
+	}
+}
+
+func TestHandleStorage(t *testing.T) {
+	srv, _ := setupTestServer(t)
+	get := func() StorageUsage {
+		t.Helper()
+		w := httptest.NewRecorder()
+		srv.Mux.ServeHTTP(w, httptest.NewRequest("GET", "/api/storage", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+		}
+		var u StorageUsage
+		if err := json.NewDecoder(w.Body).Decode(&u); err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
+
+	parser.SetMachinesDir("")
+	if u := get(); u.Machines == nil || len(u.Machines) != 0 || u.TotalBytes != 0 || u.OverLimit {
+		t.Errorf("single-machine mode: %+v, want no machines", u)
+	}
+
+	machines := filepath.Join(t.TempDir(), "machines")
+	for name, size := range map[string]int{"office": 700 * 1024, "home": 500 * 1024} {
+		dir := filepath.Join(machines, name, "projects", "-p")
+		os.MkdirAll(dir, 0o755)
+		if err := os.WriteFile(filepath.Join(dir, "s.jsonl"), make([]byte, size), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	parser.SetMachinesDir(machines)
+	t.Cleanup(func() { parser.SetMachinesDir("") })
+
+	tests := []struct {
+		maxMB    int
+		wantOver bool
+	}{
+		{0, false}, // no limit
+		{2, false},
+		{1, true}, // 1.2 MB stored
+	}
+	for _, tt := range tests {
+		srv.Handlers.MaxStorageMB = tt.maxMB
+		u := get()
+		if len(u.Machines) != 2 || u.Machines[0].Machine != "home" || u.TotalBytes != 1200*1024 {
+			t.Fatalf("max %d MB: %+v", tt.maxMB, u)
+		}
+		if u.OverLimit != tt.wantOver || u.MaxBytes != int64(tt.maxMB)*1024*1024 {
+			t.Errorf("max %d MB: over/max = %v/%d, want %v/%d", tt.maxMB, u.OverLimit, u.MaxBytes, tt.wantOver, tt.maxMB*1024*1024)
 		}
 	}
 }

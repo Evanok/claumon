@@ -48,7 +48,8 @@ func TestLoadConfigExpandsTildePaths(t *testing.T) {
 		"credentials_path": "~/claude-sync/.credentials.json",
 		"db_path": "~/.claumon-test/usage.db",
 		"machines_dir": "~/claumon/machines",
-		"machine_aliases": {"DESKTOP-7QK2": "home-windows"}
+		"machine_aliases": {"DESKTOP-7QK2": "home-windows"},
+		"max_storage_mb": 2048
 	}`
 	if err := os.WriteFile(configPath, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
@@ -70,6 +71,9 @@ func TestLoadConfigExpandsTildePaths(t *testing.T) {
 	}
 	if got := cfg.MachineAliases["DESKTOP-7QK2"]; got != "home-windows" {
 		t.Errorf("MachineAliases[DESKTOP-7QK2] = %q, want home-windows", got)
+	}
+	if cfg.MaxStorageMB != 2048 {
+		t.Errorf("MaxStorageMB = %d, want 2048", cfg.MaxStorageMB)
 	}
 }
 

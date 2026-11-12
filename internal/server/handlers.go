@@ -34,6 +34,9 @@ type Handlers struct {
 	// retention, so the whole kept history can be shown. Values below
 	// minHistoryMaxDays are raised to it.
 	HistoryMaxDays int
+	// MaxStorageMB is the disk space the machines directory may use before
+	// the dashboard warns (multi-machine mode); 0 means no limit.
+	MaxStorageMB int
 
 	UpdateCommand   string
 	updateMu        sync.RWMutex
@@ -213,6 +216,44 @@ func (h *Handlers) HandleMachines(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, machines)
+}
+
+// StorageUsage is the /api/storage payload.
+type StorageUsage struct {
+	Machines   []parser.MachineStorage `json:"machines"`
+	TotalBytes int64                   `json:"total_bytes"`
+	MaxBytes   int64                   `json:"max_bytes"` // 0: no limit
+	OverLimit  bool                    `json:"over_limit"`
+}
+
+// StorageReport measures the disk space used per machine under the machines
+// directory and compares the total with MaxStorageMB. Machines is empty in
+// single-machine mode.
+func (h *Handlers) StorageReport() (StorageUsage, error) {
+	machines, err := parser.DiscoverMachineStorage()
+	if err != nil {
+		return StorageUsage{}, err
+	}
+	report := StorageUsage{Machines: machines, MaxBytes: int64(h.MaxStorageMB) * 1024 * 1024}
+	if report.Machines == nil {
+		report.Machines = []parser.MachineStorage{}
+	}
+	for _, m := range machines {
+		report.TotalBytes += m.Bytes
+	}
+	report.OverLimit = report.MaxBytes > 0 && report.TotalBytes > report.MaxBytes
+	return report, nil
+}
+
+// HandleStorage reports the disk space used per machine (multi-machine
+// mode). Nothing is ever deleted: the limit only raises a warning.
+func (h *Handlers) HandleStorage(w http.ResponseWriter, r *http.Request) {
+	report, err := h.StorageReport()
+	if err != nil {
+		writeJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, report)
 }
 
 func (h *Handlers) HandleSessions(w http.ResponseWriter, r *http.Request) {

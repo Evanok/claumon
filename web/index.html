@@ -1039,12 +1039,13 @@ tr.clickable { cursor: pointer; }
             <option value="60">60 days</option>
             <option value="90">90 days</option>
           </select>
+          <select id="history-machine" class="history-range-select" title="Machine" style="display:none"></select>
           <span id="tokens-total" style="margin-left:auto;font-size:11px;font-weight:400;color:var(--text-dim)"></span>
         </h3>
         <div id="chart-tokens"></div>
       </div>
       <div class="chart-card">
-        <h3 style="display:flex;align-items:center;gap:12px">Equiv. API Cost <span class="history-range-label">(14 days)</span>
+        <h3 style="display:flex;align-items:center;gap:12px">Equiv. API Cost <span class="history-range-label" data-with-machine>(14 days)</span>
           <span id="cost-total" style="margin-left:auto;font-size:11px;font-weight:400;color:var(--text-dim)"></span>
         </h3>
         <div id="chart-cost"></div>
@@ -1081,6 +1082,7 @@ tr.clickable { cursor: pointer; }
           <button class="active" data-range="today" onclick="setSessionRange('today')">Today</button>
           <button data-range="all" onclick="setSessionRange('all')" title="Most recent 50 sessions">Recent</button>
         </span>
+        <select id="sessions-machine" class="history-range-select" title="Machine" style="display:none;margin-left:8px"></select>
       </h3>
       <table>
         <thead>
@@ -1632,9 +1634,12 @@ function applyHistory(data) {
   }
   const { rows, unit } = bucketHistory(days);
   historyData = rows;
+  // The tokens chart shows the machine in its filter; the cost chart, which
+  // has no filter of its own, names it in its label.
   const label = (historyRange === 'all' ? 'all' : historyRange + ' days') + (unit ? ', ' + unit : '');
   document.querySelectorAll('.history-range-label').forEach(el => {
-    el.textContent = `(${label})`;
+    const machine = historyMachine && el.hasAttribute('data-with-machine') ? ', ' + historyMachine : '';
+    el.textContent = `(${label}${machine})`;
   });
   renderTokensChart();
   renderBarChart('chart-cost', historyData, 'cost_usd', () => 'var(--green)');
@@ -1643,9 +1648,10 @@ function applyHistory(data) {
 
 // onlyIfChanged skips the re-render on periodic polls when nothing moved.
 function fetchHistory(onlyIfChanged) {
-  const range = historyRange;
-  fetch(`/api/history?days=${historyFetchDays()}`).then(r => r.json()).then(data => {
-    if (range !== historyRange) return; // range changed while in flight
+  const range = historyRange, machine = historyMachine;
+  const machineParam = machine ? '&machine=' + encodeURIComponent(machine) : '';
+  fetch(`/api/history?days=${historyFetchDays()}${machineParam}`).then(r => r.json()).then(data => {
+    if (range !== historyRange || machine !== historyMachine) return; // changed while in flight
     if (onlyIfChanged && JSON.stringify(data) === JSON.stringify(historyRaw)) return;
     applyHistory(data);
   }).catch(() => {});
@@ -1658,6 +1664,66 @@ document.getElementById('history-range').addEventListener('change', e => {
   historyWanted = v;
   try { localStorage.setItem('claumon.historyDays', String(v)); } catch (e2) {}
   fetchHistory(false);
+});
+
+// --- Machine filters (multi-machine mode) ---
+// The history and session list can each be narrowed to one machine. The
+// filters only show when there are machines: the machines with stored
+// history, plus those holding the listed sessions.
+// The viewer's choices are kept as is; the filters apply only when the
+// chosen machine is known (a renamed machine, a stale choice or
+// single-machine mode then show all machines).
+let knownMachines = [];
+let historyMachineWanted = '';  // '' = all machines
+let sessionsMachineWanted = '';
+try {
+  historyMachineWanted = localStorage.getItem('claumon.historyMachine') || '';
+  sessionsMachineWanted = localStorage.getItem('claumon.sessionsMachine') || '';
+} catch (e) {}
+let historyMachine = '';
+let sessionsMachine = '';
+
+function renderMachineFilters() {
+  const known = m => knownMachines.includes(m) ? m : '';
+  const options = '<option value="">All machines</option>' +
+    knownMachines.map(m => `<option value="${escHtml(m)}">${escHtml(m)}</option>`).join('');
+  [['history-machine', historyMachineWanted], ['sessions-machine', sessionsMachineWanted]].forEach(([id, wanted]) => {
+    const el = document.getElementById(id);
+    el.style.display = knownMachines.length ? '' : 'none';
+    el.innerHTML = options;
+    el.value = known(wanted);
+  });
+  if (known(historyMachineWanted) !== historyMachine) {
+    historyMachine = known(historyMachineWanted);
+    fetchHistory(false);
+  }
+  if (known(sessionsMachineWanted) !== sessionsMachine) {
+    sessionsMachine = known(sessionsMachineWanted);
+    renderSessions(sessionsData);
+  }
+}
+
+function fetchMachines() {
+  fetch('/api/machines').then(r => r.json()).then(list => {
+    const names = new Set(list);
+    sessionsData.forEach(s => (s.machines || []).forEach(m => names.add(m)));
+    const next = [...names].sort();
+    if (JSON.stringify(next) === JSON.stringify(knownMachines)) return;
+    knownMachines = next;
+    renderMachineFilters();
+  }).catch(() => {});
+}
+
+document.getElementById('history-machine').addEventListener('change', e => {
+  historyMachine = historyMachineWanted = e.target.value;
+  try { localStorage.setItem('claumon.historyMachine', historyMachine); } catch (e2) {}
+  fetchHistory(false);
+});
+
+document.getElementById('sessions-machine').addEventListener('change', e => {
+  sessionsMachine = sessionsMachineWanted = e.target.value;
+  try { localStorage.setItem('claumon.sessionsMachine', sessionsMachine); } catch (e2) {}
+  renderSessions(sessionsData);
 });
 
 // --- Running Processes ---
@@ -1786,7 +1852,11 @@ function renderSessions(sessions) {
   // session carries the machines holding a copy of it.
   const showMachine = sessions.some(s => (s.machines || []).length);
   document.getElementById('sessions-machine-col').style.display = showMachine ? '' : 'none';
-  const label = sessionRange === 'all' ? 'No recent sessions found' : 'No sessions today';
+  if (sessionsMachine) {
+    sessions = sessions.filter(s => (s.machines || []).includes(sessionsMachine));
+  }
+  let label = sessionRange === 'all' ? 'No recent sessions found' : 'No sessions today';
+  if (sessionsMachine) label += ' on ' + escHtml(sessionsMachine);
   if (!sessions.length) {
     tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-dim);padding:24px">${label}</td></tr>`;
     return;
@@ -1797,7 +1867,7 @@ function renderSessions(sessions) {
   tbody.innerHTML = sessions.map(s => `
     <tr class="clickable" data-session-id="${s.id}" onclick="openSessionDetail('${s.id}')">
       <td class="mono" title="${escHtml(s.cwd || s.project)}">${escHtml(shortProject(s.project || s.cwd))}</td>
-      ${showMachine ? `<td class="mono">${escHtml((s.machines || []).join(', '))}</td>` : ''}
+      ${showMachine ? `<td class="mono" style="white-space:nowrap">${escHtml((s.machines || []).join(', '))}</td>` : ''}
       <td>${escHtml(s.title || '—')}</td>
       <td><span style="color:var(--purple)">${escHtml(shortModel(s.model))}</span></td>
       <td class="mono">${fmtNum(s.input_tokens + s.output_tokens + s.cache_read_tokens + s.cache_create_tokens)}</td>
@@ -1849,6 +1919,7 @@ function fetchSessions() {
   fetch(url).then(r => r.json()).then(data => {
     sessionsData = data;
     renderSessions(data);
+    fetchMachines();
     if (sessionRange === 'today') fetchHeatmap();
   }).catch(() => {});
 }

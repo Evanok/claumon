@@ -61,6 +61,8 @@ type Config struct {
 	// Tokens agents present to push session files to POST /api/ingest
 	// (multi-machine mode). Empty disables the route.
 	IngestTokens []string `json:"ingest_tokens,omitempty"`
+	// Settings of `claumon agent` on the machines that push their sessions.
+	Agent AgentConfig `json:"agent,omitempty"`
 }
 
 // localMachineName names the machine claumon runs on in multi-machine mode:
@@ -160,6 +162,9 @@ func main() {
 			return
 		case "service":
 			runService()
+			return
+		case "agent":
+			runAgent()
 			return
 		case "diagnostics":
 			runDiagnostics()

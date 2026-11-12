@@ -83,7 +83,7 @@ This file is fork-only: leave it out of upstream pull requests.
 - **Evidence:** `renderBarChart` and `renderBillableChart` in
   `web/index.html` use `fmtAxis(Math.round(...))` and `'$' + Math.round(val)`;
   seen on a screenshot of a $0.60 day.
-- **Fix:** see the commit "UI: keep decimals on small chart scales".
+- **Fix:** `a9fddd2`.
 
 ## Found, not fixed
 

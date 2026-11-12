@@ -163,11 +163,17 @@ func (c *Client) FetchUsage(ctx context.Context) (*UsageResponse, error) {
 		log.Printf("[api] Raw usage response: %s", string(body))
 	})
 
+	return ParseUsage(body)
+}
+
+// ParseUsage decodes a usage API response body, as FetchUsage does. A
+// claumon server uses it for responses fetched by agents (multi-machine
+// mode).
+func ParseUsage(body []byte) (*UsageResponse, error) {
 	var raw rawUsageResponse
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("parsing usage response: %w", err)
 	}
-
 	return mapUsageResponse(raw, body), nil
 }
 

@@ -110,3 +110,27 @@ func TestServeHTTPSendsHeadersBeforeFirstEvent(t *testing.T) {
 		t.Errorf("Content-Type = %q, want text/event-stream", ct)
 	}
 }
+
+func TestBrokerClients(t *testing.T) {
+	broker := NewBroker()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go broker.Run(ctx)
+
+	if n := broker.Clients(); n != 0 {
+		t.Fatalf("clients = %d, want 0", n)
+	}
+	ch := make(chan SSEEvent, 1)
+	broker.register <- ch
+	broker.Send(SSEEvent{Event: "sync"}) // processed after the registration
+	<-ch
+	if n := broker.Clients(); n != 1 {
+		t.Errorf("clients = %d, want 1", n)
+	}
+	broker.unregister <- ch
+	broker.Send(SSEEvent{Event: "sync"})
+	time.Sleep(10 * time.Millisecond)
+	if n := broker.Clients(); n != 0 {
+		t.Errorf("clients after unregister = %d, want 0", n)
+	}
+}

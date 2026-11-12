@@ -97,3 +97,17 @@ func TestMapUsageResponseLegacyBuckets(t *testing.T) {
 		t.Errorf("WeeklyScoped = %+v, want empty", u.WeeklyScoped)
 	}
 }
+
+func TestParseUsage(t *testing.T) {
+	body := `{"five_hour": {"utilization": 42.0, "resets_at": "2026-07-21T10:10:00+00:00"}, "seven_day": {"utilization": 17.0, "resets_at": "2026-07-25T16:00:00+00:00"}}`
+	u, err := ParseUsage([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.SessionPercent != 42 || u.WeeklyPercent != 17 || string(u.Raw) != body {
+		t.Errorf("ParseUsage = session %v, weekly %v, raw %q", u.SessionPercent, u.WeeklyPercent, u.Raw)
+	}
+	if _, err := ParseUsage([]byte("not json")); err == nil {
+		t.Error("ParseUsage accepted invalid JSON")
+	}
+}

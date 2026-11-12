@@ -32,6 +32,14 @@ func NewBroker() *SSEBroker {
 	}
 }
 
+// Clients returns the number of connected SSE clients: open dashboard tabs
+// and other live viewers.
+func (b *SSEBroker) Clients() int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return len(b.clients)
+}
+
 func (b *SSEBroker) Run(ctx context.Context) {
 	pingTicker := time.NewTicker(30 * time.Second)
 	defer pingTicker.Stop()

@@ -284,9 +284,16 @@ func (h *Handlers) HandleSessions(w http.ResponseWriter, r *http.Request) {
 				limit = n
 			}
 		}
-		sessions, err = parser.DiscoverRecentSessions(h.claudeDir, limit)
+		if machine := r.URL.Query().Get("machine"); machine != "" {
+			sessions, err = parser.DiscoverRecentSessionsOnMachine(h.claudeDir, machine, limit)
+		} else {
+			sessions, err = parser.DiscoverRecentSessions(h.claudeDir, limit)
+		}
 	} else {
 		sessions, err = parser.DiscoverTodaySessions(h.claudeDir)
+		if machine := r.URL.Query().Get("machine"); machine != "" && err == nil {
+			sessions = parser.SessionsOnMachine(sessions, machine)
+		}
 	}
 	if err != nil {
 		writeJSONError(w, err.Error(), http.StatusInternalServerError)

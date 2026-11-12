@@ -372,3 +372,60 @@ func TestDiscoverMachineStorage(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoverRecentSessionsOnMachine(t *testing.T) {
+	base := t.TempDir()
+	t0 := time.Date(2026, 3, 20, 13, 0, 0, 0, time.UTC)
+	writeLedgerFiles(t, base, []ledgerFile{
+		// The two most recent sessions are local; with a limit of 2 they
+		// would hide the office ones without the machine filter.
+		{"machines/office/projects/-p/o1.jsonl", []string{ledgerUser1, ledgerResp1}, t0},
+		{"machines/office/projects/-p/shared.jsonl", []string{ledgerUser2, ledgerResp2}, t0.Add(time.Hour)},
+		{"claude/projects/-p/shared.jsonl", []string{ledgerUser2, ledgerResp2}, t0.Add(2 * time.Hour)},
+		{"claude/projects/-p/l1.jsonl", []string{ledgerUser3, ledgerResp3}, t0.Add(3 * time.Hour)},
+		{"claude/projects/-p/l2.jsonl", []string{ledgerLegacyUser, ledgerLegacyResp}, t0.Add(4 * time.Hour)},
+	})
+	setMachinesDirForTest(t, filepath.Join(base, "machines"))
+	setMachineNamesForTest(t, "laptop", nil)
+	claude := filepath.Join(base, "claude")
+
+	ids := func(sessions []*SessionSummary) string {
+		var out []string
+		for _, s := range sessions {
+			out = append(out, s.ID)
+		}
+		sort.Strings(out)
+		return strings.Join(out, ",")
+	}
+	for _, tt := range []struct {
+		machine string
+		want    string
+	}{
+		{"", "l1,l2"},
+		{"office", "o1,shared"},
+		{"laptop", "l1,l2"},
+		{"unknown", ""},
+	} {
+		var got []*SessionSummary
+		var err error
+		if tt.machine == "" {
+			got, err = DiscoverRecentSessions(claude, 2)
+		} else {
+			got, err = DiscoverRecentSessionsOnMachine(claude, tt.machine, 2)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ids(got) != tt.want {
+			t.Errorf("machine %q: sessions = %s, want %s", tt.machine, ids(got), tt.want)
+		}
+	}
+
+	all, err := DiscoverSessions(claude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(SessionsOnMachine(all, "office")); got != "o1,shared" {
+		t.Errorf("SessionsOnMachine(office) = %s, want o1,shared", got)
+	}
+}

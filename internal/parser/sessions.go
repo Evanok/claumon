@@ -470,6 +470,19 @@ func DiscoverSessions(claudeDir string) ([]*SessionSummary, error) {
 // modified ones, plus the other copies of the same sessions so that their
 // merged totals are complete.
 func DiscoverRecentSessions(claudeDir string, limit int) ([]*SessionSummary, error) {
+	return discoverRecentSessions(claudeDir, limit, "")
+}
+
+// DiscoverRecentSessionsOnMachine is DiscoverRecentSessions restricted to
+// the sessions with a copy on machine (multi-machine mode): the limit most
+// recent of them, so other machines' sessions do not take their places.
+func DiscoverRecentSessionsOnMachine(claudeDir, machine string, limit int) ([]*SessionSummary, error) {
+	return discoverRecentSessions(claudeDir, limit, machine)
+}
+
+// discoverRecentSessions implements DiscoverRecentSessions; a non-empty
+// machine keeps only the sessions with a copy on that machine.
+func discoverRecentSessions(claudeDir string, limit int, machine string) ([]*SessionSummary, error) {
 	all, err := enumerateFiles(claudeDir)
 	if err != nil {
 		return nil, err
@@ -488,6 +501,9 @@ func DiscoverRecentSessions(claudeDir string, limit int) ([]*SessionSummary, err
 		if len(recent) == limit {
 			break
 		}
+		if machine != "" && f.machine != machine {
+			continue
+		}
 		recent[sessionIDFromPath(f.path)] = true
 	}
 	var selected sessionFiles
@@ -502,6 +518,10 @@ func DiscoverRecentSessions(claudeDir string, limit int) ([]*SessionSummary, err
 		}
 	}
 	sessions := parseSessionFiles(selected)
+	if machine != "" {
+		// A session whose copy on machine is empty is not on machine.
+		sessions = SessionsOnMachine(sessions, machine)
+	}
 	sort.SliceStable(sessions, func(i, j int) bool {
 		return sessions[i].LastActivity.After(sessions[j].LastActivity)
 	})
@@ -509,6 +529,21 @@ func DiscoverRecentSessions(claudeDir string, limit int) ([]*SessionSummary, err
 		sessions = sessions[:limit]
 	}
 	return sessions, nil
+}
+
+// SessionsOnMachine returns the sessions with a copy on machine, keeping
+// their order.
+func SessionsOnMachine(sessions []*SessionSummary, machine string) []*SessionSummary {
+	out := make([]*SessionSummary, 0, len(sessions))
+	for _, s := range sessions {
+		for _, m := range s.Machines {
+			if m == machine {
+				out = append(out, s)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // startOfDay returns midnight of t's day in t's location. Unlike

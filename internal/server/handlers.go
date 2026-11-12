@@ -30,6 +30,10 @@ type Handlers struct {
 	RateLimitTier    string
 	StuckThreshold   time.Duration
 	Forecast         *forecast.Service
+	// HistoryMaxDays is the longest window /api/history serves: the store's
+	// retention, so the whole kept history can be shown. Values below
+	// minHistoryMaxDays are raised to it.
+	HistoryMaxDays int
 
 	UpdateCommand   string
 	updateMu        sync.RWMutex
@@ -163,11 +167,22 @@ func (h *Handlers) HandleHeatmap(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, hours)
 }
 
+// minHistoryMaxDays is the history window always served, whatever the
+// retention.
+const minHistoryMaxDays = 90
+
+// historyMaxDays returns the longest window /api/history serves.
+func (h *Handlers) historyMaxDays() int {
+	return max(h.HistoryMaxDays, minHistoryMaxDays)
+}
+
+// HandleHistory returns one row per day for the last `days` days (default
+// 14). A window longer than the kept history is shortened to it.
 func (h *Handlers) HandleHistory(w http.ResponseWriter, r *http.Request) {
 	days := 14
 	if d := r.URL.Query().Get("days"); d != "" {
-		if n, err := strconv.Atoi(d); err == nil && n > 0 && n <= 90 {
-			days = n
+		if n, err := strconv.Atoi(d); err == nil && n > 0 {
+			days = min(n, h.historyMaxDays())
 		}
 	}
 
@@ -374,6 +389,7 @@ func (h *Handlers) HandleInfo(w http.ResponseWriter, r *http.Request) {
 		"update_available":  available,
 		"latest_version":    latest,
 		"update_command":    h.UpdateCommand,
+		"history_max_days":  h.historyMaxDays(),
 	}
 	if h.AuthProvider != nil {
 		status, msg := h.AuthProvider.Status()

@@ -214,6 +214,7 @@ func main() {
 	srv.Handlers.SubscriptionType = creds.SubscriptionType
 	srv.Handlers.RateLimitTier = creds.RateLimitTier
 	srv.Handlers.StuckThreshold = time.Duration(cfg.StuckThresholdMins) * time.Minute
+	srv.Handlers.HistoryMaxDays = cfg.RetentionDays
 
 	// Forecast service: prior + calibration cached, refit daily. The fit only
 	// reads completed past sessions, so we can kick it off immediately; on a

@@ -232,6 +232,48 @@ func TestHandleHistoryEmpty(t *testing.T) {
 	}
 }
 
+func TestHandleHistoryWindow(t *testing.T) {
+	tests := []struct {
+		name    string
+		maxDays int // Handlers.HistoryMaxDays (the retention)
+		query   string
+		want    int
+	}{
+		{"default window", 400, "", 14},
+		{"short retention still serves 90 days", 30, "?days=90", 90},
+		{"short retention caps at 90 days", 30, "?days=365", 90},
+		{"long retention serves a year", 400, "?days=365", 365},
+		{"window past the retention is shortened", 400, "?days=1000", 400},
+		{"invalid value falls back to the default", 400, "?days=-3", 14},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv, _ := setupTestServer(t)
+			srv.Handlers.HistoryMaxDays = tt.maxDays
+
+			w := httptest.NewRecorder()
+			srv.Mux.ServeHTTP(w, httptest.NewRequest("GET", "/api/history"+tt.query, nil))
+			var result []store.DailyAggregate
+			if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+				t.Fatal(err)
+			}
+			if len(result) != tt.want {
+				t.Errorf("got %d days, want %d", len(result), tt.want)
+			}
+
+			w = httptest.NewRecorder()
+			srv.Mux.ServeHTTP(w, httptest.NewRequest("GET", "/api/info", nil))
+			var info map[string]interface{}
+			if err := json.NewDecoder(w.Body).Decode(&info); err != nil {
+				t.Fatal(err)
+			}
+			if got, want := info["history_max_days"], float64(max(tt.maxDays, 90)); got != want {
+				t.Errorf("info history_max_days = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 func TestHandleMemories(t *testing.T) {
 	srv, _ := setupTestServer(t)
 

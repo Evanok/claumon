@@ -274,6 +274,56 @@ func TestHandleHistoryWindow(t *testing.T) {
 	}
 }
 
+func TestHandleMachineHistory(t *testing.T) {
+	srv, st := setupTestServer(t)
+	get := func(url string, v interface{}) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		srv.Mux.ServeHTTP(w, httptest.NewRequest("GET", url, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d", url, w.Code)
+		}
+		if err := json.NewDecoder(w.Body).Decode(v); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var machines []string
+	get("/api/machines", &machines)
+	if machines == nil || len(machines) != 0 {
+		t.Errorf("single-machine: machines = %#v, want []", machines)
+	}
+
+	today := time.Now().Format("2006-01-02")
+	st.UpsertDailyAggregate(store.DailyAggregate{Date: today, InputTokens: 30})
+	st.UpsertMachineDailyAggregate("office", store.DailyAggregate{Date: today, InputTokens: 10})
+	st.UpsertMachineDailyAggregate("home", store.DailyAggregate{Date: today, InputTokens: 20})
+
+	get("/api/machines", &machines)
+	if strings.Join(machines, ",") != "home,office" {
+		t.Errorf("machines = %v, want [home office]", machines)
+	}
+
+	for _, tt := range []struct {
+		query string
+		want  int
+	}{
+		{"", 30},
+		{"&machine=office", 10},
+		{"&machine=home", 20},
+		{"&machine=unknown", 0},
+	} {
+		var history []store.DailyAggregate
+		get("/api/history?days=7"+tt.query, &history)
+		if len(history) != 7 {
+			t.Fatalf("%q: %d days, want 7", tt.query, len(history))
+		}
+		if got := history[6].InputTokens; got != tt.want {
+			t.Errorf("%q: today input = %d, want %d", tt.query, got, tt.want)
+		}
+	}
+}
+
 func TestHandleMemories(t *testing.T) {
 	srv, _ := setupTestServer(t)
 

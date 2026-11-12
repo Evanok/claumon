@@ -177,7 +177,8 @@ func (h *Handlers) historyMaxDays() int {
 }
 
 // HandleHistory returns one row per day for the last `days` days (default
-// 14). A window longer than the kept history is shortened to it.
+// 14). A window longer than the kept history is shortened to it. With
+// `machine`, the rows are that machine's totals (multi-machine mode).
 func (h *Handlers) HandleHistory(w http.ResponseWriter, r *http.Request) {
 	days := 14
 	if d := r.URL.Query().Get("days"); d != "" {
@@ -186,7 +187,13 @@ func (h *Handlers) HandleHistory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	history, err := h.store.GetHistory(days)
+	var history []store.DailyAggregate
+	var err error
+	if machine := r.URL.Query().Get("machine"); machine != "" {
+		history, err = h.store.GetMachineHistory(machine, days)
+	} else {
+		history, err = h.store.GetHistory(days)
+	}
 	if err != nil {
 		writeJSONError(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -195,6 +202,17 @@ func (h *Handlers) HandleHistory(w http.ResponseWriter, r *http.Request) {
 		history = []store.DailyAggregate{}
 	}
 	writeJSON(w, history)
+}
+
+// HandleMachines lists the machines with stored history, sorted; empty in
+// single-machine mode.
+func (h *Handlers) HandleMachines(w http.ResponseWriter, r *http.Request) {
+	machines, err := h.store.Machines()
+	if err != nil {
+		writeJSONError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, machines)
 }
 
 func (h *Handlers) HandleSessions(w http.ResponseWriter, r *http.Request) {

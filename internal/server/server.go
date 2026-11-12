@@ -16,6 +16,14 @@ type Server struct {
 	Mux      http.Handler
 	Broker   *SSEBroker
 	Handlers *Handlers
+
+	routes *http.ServeMux
+}
+
+// HandleIngest serves POST /api/ingest with h, the receiver of session files
+// pushed by agents (multi-machine mode). Without it the route does not exist.
+func (s *Server) HandleIngest(h http.Handler) {
+	s.routes.Handle("POST /api/ingest", h)
 }
 
 // New builds the dashboard server. allowedHosts lists extra hostnames the
@@ -63,6 +71,7 @@ func New(claudeDir string, st *store.Store, webFS fs.FS, allowedHosts []string) 
 		Mux:      secureLocalRequests(mux, allowedHosts),
 		Broker:   broker,
 		Handlers: handlers,
+		routes:   mux,
 	}
 }
 

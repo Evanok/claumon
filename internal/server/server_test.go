@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/fabioconcina/claumon/internal/forecast"
+	"github.com/fabioconcina/claumon/internal/ingest"
 	"github.com/fabioconcina/claumon/internal/parser"
 	"github.com/fabioconcina/claumon/internal/store"
 )
@@ -443,6 +444,41 @@ func TestHandleTodayAndHeatmapPerMachine(t *testing.T) {
 	get("/api/info", &info)
 	if info["local_machine"] != "" {
 		t.Errorf("single-machine mode: local_machine = %v, want empty", info["local_machine"])
+	}
+}
+
+func TestIngestRoute(t *testing.T) {
+	srv, st := setupTestServer(t)
+	post := func(origin string) int {
+		req := httptest.NewRequest("POST", "/api/ingest", strings.NewReader("a\n"))
+		req.Header.Set("Authorization", "Bearer k")
+		req.Header.Set(ingest.HeaderMachine, "office")
+		req.Header.Set(ingest.HeaderPath, "projects/-p/s1.jsonl")
+		req.Header.Set(ingest.HeaderOffset, "0")
+		req.Header.Set(ingest.HeaderEnd, "2")
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		w := httptest.NewRecorder()
+		srv.Mux.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	if code := post(""); code == http.StatusOK {
+		t.Fatalf("ingest answered %d before being enabled", code)
+	}
+
+	machines := t.TempDir()
+	srv.HandleIngest(ingest.NewReceiver(machines, []string{"k"}, st))
+	if code := post(""); code != http.StatusOK {
+		t.Fatalf("agent upload: status = %d, want 200", code)
+	}
+	if data, err := os.ReadFile(filepath.Join(machines, "office", "projects", "-p", "s1.jsonl")); err != nil || string(data) != "a\n" {
+		t.Errorf("stored file = %q, %v", data, err)
+	}
+	// A web page from another origin cannot push files.
+	if code := post("https://evil.example"); code != http.StatusForbidden {
+		t.Errorf("cross-origin upload: status = %d, want 403", code)
 	}
 }
 

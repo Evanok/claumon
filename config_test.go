@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -49,7 +50,8 @@ func TestLoadConfigExpandsTildePaths(t *testing.T) {
 		"db_path": "~/.claumon-test/usage.db",
 		"machines_dir": "~/claumon/machines",
 		"machine_aliases": {"DESKTOP-7QK2": "home-windows"},
-		"max_storage_mb": 2048
+		"max_storage_mb": 2048,
+		"ingest_tokens": ["t1", "t2"]
 	}`
 	if err := os.WriteFile(configPath, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
@@ -74,6 +76,9 @@ func TestLoadConfigExpandsTildePaths(t *testing.T) {
 	}
 	if cfg.MaxStorageMB != 2048 {
 		t.Errorf("MaxStorageMB = %d, want 2048", cfg.MaxStorageMB)
+	}
+	if strings.Join(cfg.IngestTokens, ",") != "t1,t2" {
+		t.Errorf("IngestTokens = %v, want [t1 t2]", cfg.IngestTokens)
 	}
 }
 

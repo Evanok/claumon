@@ -21,6 +21,7 @@ import (
 	"github.com/fabioconcina/claumon/internal/api"
 	"github.com/fabioconcina/claumon/internal/auth"
 	"github.com/fabioconcina/claumon/internal/forecast"
+	"github.com/fabioconcina/claumon/internal/ingest"
 	"github.com/fabioconcina/claumon/internal/memory"
 	"github.com/fabioconcina/claumon/internal/parser"
 	"github.com/fabioconcina/claumon/internal/pricing"
@@ -57,6 +58,9 @@ type Config struct {
 	// Disk space machines_dir may use before the dashboard warns, in MB.
 	// 0 means no limit. Nothing is ever deleted.
 	MaxStorageMB int `json:"max_storage_mb,omitempty"`
+	// Tokens agents present to push session files to POST /api/ingest
+	// (multi-machine mode). Empty disables the route.
+	IngestTokens []string `json:"ingest_tokens,omitempty"`
 }
 
 // localMachineName names the machine claumon runs on in multi-machine mode:
@@ -219,6 +223,13 @@ func main() {
 	srv.Handlers.StuckThreshold = time.Duration(cfg.StuckThresholdMins) * time.Minute
 	srv.Handlers.HistoryMaxDays = cfg.RetentionDays
 	srv.Handlers.MaxStorageMB = cfg.MaxStorageMB
+	switch {
+	case len(cfg.IngestTokens) > 0 && cfg.MachinesDir == "":
+		log.Printf("[ingest] ingest_tokens is set but machines_dir is not: agent uploads are disabled")
+	case len(cfg.IngestTokens) > 0:
+		srv.HandleIngest(ingest.NewReceiver(cfg.MachinesDir, cfg.IngestTokens, st))
+		log.Printf("[ingest] Accepting agent uploads into %s (%d tokens)", cfg.MachinesDir, len(cfg.IngestTokens))
+	}
 	if cfg.MachinesDir != "" {
 		if report, err := srv.Handlers.StorageReport(); err != nil {
 			log.Printf("[storage] Failed to measure %s: %v", cfg.MachinesDir, err)

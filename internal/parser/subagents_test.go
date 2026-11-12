@@ -103,7 +103,7 @@ func TestSubagentTranscriptsAddToTotals(t *testing.T) {
 				t.Fatal(err)
 			}
 			total := 0
-			for _, n := range hourlyTokens(files.all(), day(20)) {
+			for _, n := range hourlyTokens(files.all(), day(20), nil) {
 				total += n
 			}
 			if total != 107+13+1050+6 {

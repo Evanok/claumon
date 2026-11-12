@@ -150,6 +150,17 @@ func (h *Handlers) HandleUsage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) HandleToday(w http.ResponseWriter, r *http.Request) {
+	today := time.Now().Format("2006-01-02")
+	// With `machine`, today's totals of that machine (multi-machine mode).
+	if machine := r.URL.Query().Get("machine"); machine != "" {
+		perMachine, err := parser.DiscoverMachineDailyAggregates(h.claudeDir)
+		if err != nil {
+			writeJSON(w, parser.SessionAggregate{})
+			return
+		}
+		writeJSON(w, perMachine[today][machine])
+		return
+	}
 	// Bucket tokens by message timestamp so resumed sessions don't credit
 	// their entire history to today.
 	daily, err := parser.DiscoverDailyAggregates(h.claudeDir)
@@ -157,12 +168,18 @@ func (h *Handlers) HandleToday(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, parser.SessionAggregate{})
 		return
 	}
-	today := time.Now().Format("2006-01-02")
 	writeJSON(w, daily[today])
 }
 
 func (h *Handlers) HandleHeatmap(w http.ResponseWriter, r *http.Request) {
-	hours, err := parser.HourlyTokensToday(h.claudeDir)
+	var hours [24]int
+	var err error
+	// With `machine`, the hours of that machine (multi-machine mode).
+	if machine := r.URL.Query().Get("machine"); machine != "" {
+		hours, err = parser.HourlyTokensTodayOnMachine(h.claudeDir, machine)
+	} else {
+		hours, err = parser.HourlyTokensToday(h.claudeDir)
+	}
 	if err != nil {
 		writeJSON(w, [24]int{})
 		return
@@ -449,6 +466,7 @@ func (h *Handlers) HandleInfo(w http.ResponseWriter, r *http.Request) {
 		"latest_version":    latest,
 		"update_command":    h.UpdateCommand,
 		"history_max_days":  h.historyMaxDays(),
+		"local_machine":     parser.LocalMachineName(),
 	}
 	if h.AuthProvider != nil {
 		status, msg := h.AuthProvider.Status()

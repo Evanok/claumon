@@ -179,7 +179,7 @@ func TestHourlyTokensCrossFileDedup(t *testing.T) {
 		files = append(files, f)
 	}
 
-	hours := hourlyTokens(files, day(20))
+	hours := hourlyTokens(files, day(20), nil)
 	h1 := time.Date(2026, 3, 20, 10, 0, 5, 0, time.UTC).Local().Hour()
 	h2 := time.Date(2026, 3, 20, 11, 0, 5, 0, time.UTC).Local().Hour()
 	want := [24]int{}

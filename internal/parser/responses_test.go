@@ -84,7 +84,7 @@ func TestParseSessionFileHourlyDedupesResponses(t *testing.T) {
 	}
 	date := time.Date(2026, 3, 20, 10, 0, 0, 0, time.UTC).Local().Format("2006-01-02")
 	var total int
-	for _, n := range hourlyTokens([]sessionFile{f}, date) {
+	for _, n := range hourlyTokens([]sessionFile{f}, date, nil) {
 		total += n
 	}
 	if want := dupIn + dupOut + dupCacheRead + dupCacheCreate; total != want {

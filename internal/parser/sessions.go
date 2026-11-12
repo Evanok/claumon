@@ -688,7 +688,7 @@ func HourlyTokensToday(claudeDir string) ([24]int, error) {
 	if err != nil {
 		return [24]int{}, err
 	}
-	return hourlyTokens(files.all(), localDate(time.Now())), nil
+	return hourlyTokens(files.all(), localDate(time.Now()), nil), nil
 }
 
 // DiscoverDailyAggregates walks all session files and returns aggregates
@@ -703,6 +703,19 @@ func DiscoverDailyAggregates(claudeDir string) (map[string]SessionAggregate, err
 		return nil, err
 	}
 	return dailyAggregates(files.all()), nil
+}
+
+// HourlyTokensTodayOnMachine is HourlyTokensToday restricted to the records
+// counted for one machine (multi-machine mode), the same attribution as
+// DiscoverMachineDailyAggregates.
+func HourlyTokensTodayOnMachine(claudeDir, machine string) ([24]int, error) {
+	files, err := enumerateFiles(claudeDir)
+	if err != nil {
+		return [24]int{}, err
+	}
+	return hourlyTokens(files.all(), localDate(time.Now()), func(f sessionFile) bool {
+		return f.machine == machine
+	}), nil
 }
 
 // DiscoverMachineDailyAggregates is DiscoverDailyAggregates split by

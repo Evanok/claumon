@@ -203,10 +203,14 @@ func dailyAggregatesBy(files []sessionFile, key func(sessionFile) string) map[st
 
 // hourlyTokens returns the deduplicated token totals (input + output + cache
 // read + cache create) of files for the local date, indexed by local hour.
-func hourlyTokens(files []sessionFile, date string) [24]int {
+// When keep is set, only the records attributed to a file it keeps count.
+func hourlyTokens(files []sessionFile, date string, keep func(sessionFile) bool) [24]int {
 	var hours [24]int
 	visitUniqueRecords(files, ledgerVisitor{
-		response: func(_ sessionFile, r apiResponse) {
+		response: func(f sessionFile, r apiResponse) {
+			if keep != nil && !keep(f) {
+				return
+			}
 			ts := r.Time.Local()
 			if ts.Format("2006-01-02") != date {
 				return

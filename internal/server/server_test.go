@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -374,6 +375,74 @@ func TestHandleStorage(t *testing.T) {
 		if u.OverLimit != tt.wantOver || u.MaxBytes != int64(tt.maxMB)*1024*1024 {
 			t.Errorf("max %d MB: over/max = %v/%d, want %v/%d", tt.maxMB, u.OverLimit, u.MaxBytes, tt.wantOver, tt.maxMB*1024*1024)
 		}
+	}
+}
+
+func TestHandleTodayAndHeatmapPerMachine(t *testing.T) {
+	srv, _ := setupTestServer(t)
+	now := time.Now()
+	at := time.Date(now.Year(), now.Month(), now.Day(), 0, 30, 0, 0, time.Local) // hour 0, local
+	ts := at.UTC().Format(time.RFC3339)
+	session := func(id string, input int) string {
+		return fmt.Sprintf(`{"type":"user","uuid":"u-%[1]s","timestamp":"%[2]s","message":{"role":"user","content":"hi"}}
+{"type":"assistant","uuid":"a-%[1]s","timestamp":"%[2]s","message":{"id":"msg-%[1]s","model":"claude-sonnet-4-6","usage":{"input_tokens":%[3]d,"output_tokens":0}}}
+`, id, ts, input)
+	}
+	write := func(dir, id string, input int) {
+		os.MkdirAll(dir, 0o755)
+		if err := os.WriteFile(filepath.Join(dir, id+".jsonl"), []byte(session(id, input)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(srv.Handlers.claudeDir, "projects", "-p"), "local1", 10)
+	machines := filepath.Join(t.TempDir(), "machines")
+	write(filepath.Join(machines, "office", "projects", "-p"), "remote1", 20)
+	parser.SetMachinesDir(machines)
+	parser.SetMachineNames("laptop", nil)
+	t.Cleanup(func() {
+		parser.SetMachinesDir("")
+		parser.SetMachineNames("", nil)
+	})
+
+	get := func(url string, v interface{}) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		srv.Mux.ServeHTTP(w, httptest.NewRequest("GET", url, nil))
+		if err := json.NewDecoder(w.Body).Decode(v); err != nil {
+			t.Fatalf("%s: %v", url, err)
+		}
+	}
+	for _, tt := range []struct {
+		query    string
+		input    int
+		messages int
+	}{
+		{"", 30, 4},
+		{"?machine=laptop", 10, 2},
+		{"?machine=office", 20, 2},
+		{"?machine=unknown", 0, 0},
+	} {
+		var today parser.SessionAggregate
+		get("/api/today"+tt.query, &today)
+		if today.InputTokens != tt.input || today.MessageCount != tt.messages {
+			t.Errorf("today%s: input/messages = %d/%d, want %d/%d", tt.query, today.InputTokens, today.MessageCount, tt.input, tt.messages)
+		}
+		var hours [24]int
+		get("/api/heatmap"+tt.query, &hours)
+		if hours[0] != tt.input {
+			t.Errorf("heatmap%s: hour 0 = %d, want %d", tt.query, hours[0], tt.input)
+		}
+	}
+
+	var info map[string]interface{}
+	get("/api/info", &info)
+	if info["local_machine"] != "laptop" {
+		t.Errorf("info local_machine = %v, want laptop", info["local_machine"])
+	}
+	parser.SetMachinesDir("")
+	get("/api/info", &info)
+	if info["local_machine"] != "" {
+		t.Errorf("single-machine mode: local_machine = %v, want empty", info["local_machine"])
 	}
 }
 

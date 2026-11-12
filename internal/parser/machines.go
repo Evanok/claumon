@@ -47,6 +47,16 @@ func SetMachineNames(local string, aliases map[string]string) {
 	machineNames.Store(machineNaming{local: local, aliases: copied})
 }
 
+// LocalMachineName returns the name shown for the machine claumon runs on in
+// multi-machine mode (its hostname or alias), or "" in single-machine mode.
+func LocalMachineName() string {
+	if getMachinesDir() == "" {
+		return ""
+	}
+	naming, _ := machineNames.Load().(machineNaming)
+	return naming.displayName(naming.local)
+}
+
 // displayName returns the alias of name, or name when it has none.
 func (n machineNaming) displayName(name string) string {
 	if alias := n.aliases[name]; alias != "" {

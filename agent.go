@@ -96,8 +96,11 @@ func runAgent() {
 		ServerURL: o.serverURL,
 		Token:     o.token,
 		Machine:   o.machine,
-		Client:    &http.Client{Timeout: 2 * time.Minute},
-		State:     ingest.LoadState(o.statePath),
+		// Leave out what claumon never reads (api-request lines, images,
+		// duplicated tool results): about 80% of the size.
+		Filter: ingest.SlimLine,
+		Client: &http.Client{Timeout: 2 * time.Minute},
+		State:  ingest.LoadState(o.statePath),
 	}
 	log.Printf("[agent] Pushing %s as machine %q to %s", filepath.Join(o.claudeDir, "projects"), o.machine, o.serverURL)
 

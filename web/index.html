@@ -1178,6 +1178,14 @@ function fmtNum(n) {
 }
 // Axis ticks drop the decimal at three digits ("911M", not "910.6M") so the
 // label fits the charts' left padding.
+// fmtTick formats a y-axis tick of a chart whose largest value is maxVal.
+// Small scales (a few dollars) keep decimals, which rounding to whole
+// numbers would turn into repeated or wrong labels.
+function fmtTick(val, maxVal) {
+  if (maxVal >= 10) return fmtAxis(Math.round(val));
+  return String(parseFloat(val.toFixed(2)));
+}
+
 function fmtAxis(n) {
   for (const [div, unit] of [[1e9, 'B'], [1e6, 'M'], [1e3, 'K']]) {
     if (n >= div) {
@@ -1467,7 +1475,7 @@ function renderBarChart(containerId, data, valueKey, colorFn) {
     const y = pad + (h - pad * 2) * (1 - i/4);
     const val = (maxVal * i / 4);
     svg += `<line x1="${pad}" y1="${y}" x2="${w-10}" y2="${y}" stroke="var(--border)" stroke-width="0.5"/>`;
-    svg += `<text x="${pad-4}" y="${y+3}" class="bar-value" text-anchor="end">${fmtAxis(Math.round(val))}</text>`;
+    svg += `<text x="${pad-4}" y="${y+3}" class="bar-value" text-anchor="end">${fmtTick(val, maxVal)}</text>`;
   }
 
   data.forEach((d, i) => {
@@ -1483,7 +1491,7 @@ function renderBarChart(containerId, data, valueKey, colorFn) {
 
     // Value label on top of bar
     if (val > 0 && showValues) {
-      const label = valueKey === 'cost_usd' ? '$' + Math.round(val) : fmtNum(val);
+      const label = valueKey === 'cost_usd' ? '$' + (val < 10 ? val.toFixed(2) : Math.round(val)) : fmtNum(val);
       svg += `<text x="${x + barW/2}" y="${y - 4}" class="bar-value" text-anchor="middle">${label}</text>`;
     }
 
@@ -1807,7 +1815,7 @@ function renderBillableChart(containerId, data) {
   for (let i = 0; i <= 4; i++) {
     const y = pad + (h - pad * 2) * (1 - i/4);
     svg += `<line x1="${pad}" y1="${y}" x2="${w-10}" y2="${y}" stroke="var(--border)" stroke-width="0.5"/>`;
-    svg += `<text x="${pad-4}" y="${y+3}" class="bar-value" text-anchor="end">${fmtAxis(Math.round(maxVal * i / 4))}</text>`;
+    svg += `<text x="${pad-4}" y="${y+3}" class="bar-value" text-anchor="end">${fmtTick(maxVal * i / 4, maxVal)}</text>`;
   }
 
   data.forEach((d, i) => {

@@ -74,6 +74,17 @@ This file is fork-only: leave it out of upstream pull requests.
   line for the token breakdown, so nothing says it is a daily total.
 - **Fix:** `fc6ee50` (label "Total Tokens Today").
 
+### 12. Chart labels rounded to whole numbers on small scales
+
+- **Symptom:** the y-axis ticks of the daily charts are rounded to whole
+  numbers, and the cost labels above the bars to whole dollars. With small
+  values (a light day, a single machine) the cost axis reads "0, 0, 1, 1, 1"
+  and a $0.60 bar is labelled "$1".
+- **Evidence:** `renderBarChart` and `renderBillableChart` in
+  `web/index.html` use `fmtAxis(Math.round(...))` and `'$' + Math.round(val)`;
+  seen on a screenshot of a $0.60 day.
+- **Fix:** see the commit "UI: keep decimals on small chart scales".
+
 ## Found, not fixed
 
 ### 8. The Recent list shows fewer sessions than its limit

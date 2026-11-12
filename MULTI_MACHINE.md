@@ -254,4 +254,6 @@ machine out.
 
 - Running and stuck states, and the actions that interrupt a session, only
   apply to processes on the machine claumon runs on.
-- Memory files are only read from the local `~/.claude`.
+- Memory files are only read from the local `~/.claude`; agents do not send
+  them. A multi-machine server without memory files of its own hides the
+  Memories and Graph tabs.

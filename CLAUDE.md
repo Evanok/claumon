@@ -23,7 +23,7 @@ Single `main.go` orchestrates 4 goroutines (SSE broker, usage API poller, file w
 
 - **api** — Claude OAuth usage API client with exponential backoff
 - **auth** — Multi-platform credential loading (macOS Keychain, Linux secret-service, Windows Credential Manager)
-- **parser** — Session JSONL discovery and token/cost aggregation, with cross-file deduplication (message ID for tokens, line UUID for messages) and optional multi-machine discovery (`SetMachinesDir`, see `MULTI_MACHINE.md`)
+- **parser** — Session JSONL discovery and token/cost aggregation (subagent transcripts add to their parent session), with cross-file deduplication (message ID for tokens, line UUID for messages) and optional multi-machine discovery (`SetMachinesDir`, see `MULTI_MACHINE.md`)
 - **pricing** — Layered pricing: embedded JSON → 24h cache → GitHub remote → config overrides
 - **memory** — Memory file discovery, graph building, staleness detection, consolidation scoring
 - **server** — HTTP routes, handlers, SSE broker

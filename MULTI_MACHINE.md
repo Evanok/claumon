@@ -26,7 +26,9 @@ laid out like a `~/.claude` directory:
 
 - The machine name is the subdirectory name. Using each machine's hostname
   keeps names consistent with the local machine (see below).
-- Only `<machine>/projects/<project>/*.jsonl` files are read. Other files and
+- Only `<machine>/projects/<project>/*.jsonl` files are read, plus the
+  subagent transcripts of each session
+  (`<machine>/projects/<project>/<session>/subagents/*.jsonl`). Other files and
   directories are ignored, and so are entries whose name starts with `.`
   (handy for temporary files written during a copy).
 - The local `~/.claude/projects` is still read, and its sessions are named

@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"math"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -43,20 +44,49 @@ func primaryCopy(copies []sessionCopy) int {
 	return best
 }
 
-// mergeSessionCopies builds the summary of a session from its copies. A
-// single copy is returned as is. With several copies, descriptive fields
-// (title, model, project, cwd, context length, machine) come from the primary
-// copy, the time range spans all copies, and tokens and message counts are
+// mergeSessionCopies builds the summary of a session from its copies and
+// the subagent transcripts of the session. A single copy without subagents
+// is returned as is. With several copies, descriptive fields (title, model,
+// project, cwd, context length, machine) come from the primary copy, the
+// time range spans all copies, and tokens and message counts are
 // deduplicated across copies like the daily aggregates. Message counts then
 // only include lines carrying a timestamp, which can differ by a few lines
 // from the single-file count.
-func mergeSessionCopies(copies []sessionCopy) SessionSummary {
+//
+// Subagent responses add their tokens, and their cost at the subagent's own
+// model, to the session; their lines are not counted as messages.
+func mergeSessionCopies(copies []sessionCopy, subagents []sessionFile) SessionSummary {
 	merged := copies[primaryCopy(copies)].summary
 	merged.Machines = sessionMachines(copies)
-	if len(copies) == 1 {
+	if len(copies) == 1 && len(subagents) == 0 {
 		return merged
 	}
 
+	if len(copies) > 1 {
+		mergeCopyTotals(&merged, copies)
+	}
+	merged.EstimatedCostUSD = estimateCost(&merged)
+
+	var subagentCost float64
+	visitUniqueRecords(subagents, ledgerVisitor{
+		response: func(_ sessionFile, r apiResponse) {
+			merged.InputTokens += r.Input
+			merged.OutputTokens += r.Output
+			merged.CacheReadTokens += r.CacheRead
+			merged.CacheCreateTokens += r.CacheCreate
+			subagentCost += costFor(r.Model, r.Input, r.Output, r.CacheRead, r.CacheCreate)
+		},
+	})
+	merged.EstimatedCostUSD = math.Round((merged.EstimatedCostUSD+subagentCost)*10000) / 10000
+
+	merged.CacheEfficiency = cacheEfficiency(&merged)
+	merged.WasteFlags = detectWaste(&merged)
+	return merged
+}
+
+// mergeCopyTotals sets the time range of merged to span all copies, and its
+// tokens and message count to the deduplicated totals of the copies.
+func mergeCopyTotals(merged *SessionSummary, copies []sessionCopy) {
 	files := make([]sessionFile, 0, len(copies))
 	for _, c := range copies {
 		files = append(files, c.file)
@@ -84,11 +114,6 @@ func mergeSessionCopies(copies []sessionCopy) SessionSummary {
 			merged.MessageCount++
 		},
 	})
-
-	merged.EstimatedCostUSD = estimateCost(&merged)
-	merged.CacheEfficiency = cacheEfficiency(&merged)
-	merged.WasteFlags = detectWaste(&merged)
-	return merged
 }
 
 // sessionMachines returns the sorted distinct machines holding a copy, or

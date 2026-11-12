@@ -78,7 +78,9 @@ type ledgerVisitor struct {
 }
 
 // visitUniqueRecords merges the ledgers of files and calls v once per
-// distinct response and message. When a record appears in several files it
+// distinct response and message. Subagent transcripts only contribute
+// responses: their lines are a subagent's internal exchanges, not messages
+// of the session. When a record appears in several files it
 // is attributed to the file modified earliest: the original copy stops being
 // written once a session is copied elsewhere, so it is the oldest one. Ties
 // are broken by path so the result is deterministic. Unreadable files are
@@ -110,7 +112,7 @@ func visitUniqueRecords(files []sessionFile, v ledgerVisitor) {
 				v.response(f, r)
 			}
 		}
-		if v.message != nil {
+		if v.message != nil && f.parent == "" {
 			for _, m := range l.messages {
 				if m.UUID != "" {
 					if seenMessages[m.UUID] {
@@ -131,7 +133,8 @@ func localDate(t time.Time) string {
 
 // dailyAggregates buckets the deduplicated records of files by local date.
 // SessionCount is the number of distinct session IDs that contributed at
-// least one counted record on that date.
+// least one counted record on that date; a subagent transcript counts for
+// its parent session.
 func dailyAggregates(files []sessionFile) map[string]SessionAggregate {
 	type acc struct {
 		agg      SessionAggregate
@@ -145,7 +148,7 @@ func dailyAggregates(files []sessionFile) map[string]SessionAggregate {
 			a = &acc{sessions: map[string]bool{}}
 			perDay[date] = a
 		}
-		a.sessions[sessionIDFromPath(f.path)] = true
+		a.sessions[f.sessionID()] = true
 		return &a.agg
 	}
 

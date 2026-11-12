@@ -266,8 +266,37 @@ type sessionFile struct {
 	path    string
 	project string
 	machine string // "" in single-machine mode
+	// parent is the ID of the session a subagent transcript belongs to
+	// (<project>/<session ID>/subagents/*.jsonl); empty for session files.
+	parent  string
 	modTime time.Time
 	size    int64
+}
+
+// sessionID returns the ID of the session the file belongs to: the parent
+// session for a subagent transcript, the file name otherwise.
+func (f sessionFile) sessionID() string {
+	if f.parent != "" {
+		return f.parent
+	}
+	return sessionIDFromPath(f.path)
+}
+
+// sessionFiles is the result of an enumeration: the session transcripts, and
+// the subagent transcripts. Subagent transcripts hold the API responses of
+// the subagents a session ran; they are not sessions of their own, so they
+// only add tokens and cost to their parent session.
+type sessionFiles struct {
+	sessions  []sessionFile
+	subagents []sessionFile
+}
+
+// all returns the session and subagent files together, for computations
+// over every API response (daily and hourly totals).
+func (s sessionFiles) all() []sessionFile {
+	out := make([]sessionFile, 0, len(s.sessions)+len(s.subagents))
+	out = append(out, s.sessions...)
+	return append(out, s.subagents...)
 }
 
 // enumerateSessionFiles walks claudeDir/projects/*/ for *.jsonl and returns
@@ -279,7 +308,14 @@ type sessionFile struct {
 // an error, since a server aggregating other machines may not run Claude Code
 // itself; an error is returned only when no projects directory is readable.
 func enumerateSessionFiles(claudeDir string) ([]sessionFile, error) {
-	var files []sessionFile
+	files, err := enumerateFiles(claudeDir)
+	return files.sessions, err
+}
+
+// enumerateFiles is enumerateSessionFiles plus the subagent transcripts of
+// each session (<project>/<session ID>/subagents/*.jsonl).
+func enumerateFiles(claudeDir string) (sessionFiles, error) {
+	var files sessionFiles
 	var firstErr error
 	readable := 0
 	for _, root := range projectsRoots(claudeDir) {
@@ -296,20 +332,21 @@ func enumerateSessionFiles(claudeDir string) ([]sessionFile, error) {
 	// Without a machines directory there is a single root, so this keeps the
 	// historical "missing projects directory is an error" behavior.
 	if readable == 0 {
-		return nil, firstErr
+		return sessionFiles{}, firstErr
 	}
 
 	// Enumeration is the one place every discovery path passes through, so
 	// piggyback cache eviction of deleted files here.
-	summaryCache.prune(files)
-	ledgerCache.prune(files)
+	summaryCache.prune(files.sessions)
+	ledgerCache.prune(files.all())
 
 	return files, nil
 }
 
 // appendProjectFiles appends the *.jsonl files of each project directory in
-// entries (the listing of root.dir) to files.
-func appendProjectFiles(files []sessionFile, root projectsRoot, entries []os.DirEntry) []sessionFile {
+// entries (the listing of root.dir) to files, and the subagent transcripts
+// of its sessions.
+func appendProjectFiles(files sessionFiles, root projectsRoot, entries []os.DirEntry) sessionFiles {
 	for _, projEntry := range entries {
 		if !projEntry.IsDir() {
 			continue
@@ -322,20 +359,40 @@ func appendProjectFiles(files []sessionFile, root projectsRoot, entries []os.Dir
 			continue
 		}
 		for _, f := range matches {
-			info, err := os.Stat(f)
-			if err != nil {
-				continue
+			if sf, ok := statSessionFile(f, projName, root.machine, ""); ok {
+				files.sessions = append(files.sessions, sf)
 			}
-			files = append(files, sessionFile{
-				path:    f,
-				project: projName,
-				machine: root.machine,
-				modTime: info.ModTime(),
-				size:    info.Size(),
-			})
+		}
+
+		subagents, err := filepath.Glob(filepath.Join(projPath, "*", "subagents", "*.jsonl"))
+		if err != nil {
+			continue
+		}
+		for _, f := range subagents {
+			parent := filepath.Base(filepath.Dir(filepath.Dir(f)))
+			if sf, ok := statSessionFile(f, projName, root.machine, parent); ok {
+				files.subagents = append(files.subagents, sf)
+			}
 		}
 	}
 	return files
+}
+
+// statSessionFile builds the enumeration entry of a file, or reports false
+// when it cannot be stat'ed (deleted meanwhile).
+func statSessionFile(path, project, machine, parent string) (sessionFile, bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return sessionFile{}, false
+	}
+	return sessionFile{
+		path:    path,
+		project: project,
+		machine: machine,
+		parent:  parent,
+		modTime: info.ModTime(),
+		size:    info.Size(),
+	}, true
 }
 
 // summaryCache memoizes ParseSessionFile results. Summaries are stored by
@@ -365,14 +422,15 @@ func parseSessionFileCached(path string) (SessionSummary, error) {
 		parseSummaryByValue)
 }
 
-// parseSessionFiles parses each file and returns one summary per session,
-// with project and machine tagged. Files sharing a session ID are merged (see
+// parseSessionFiles parses each session file and returns one summary per
+// session, with project and machine tagged. Files sharing a session ID are
+// merged, and the subagent transcripts of each session add their tokens (see
 // mergeSessionCopies); empty files are skipped. Sessions are returned in the
 // order their first file appears in files.
-func parseSessionFiles(files []sessionFile) []*SessionSummary {
+func parseSessionFiles(files sessionFiles) []*SessionSummary {
 	groups := map[string][]sessionCopy{}
 	var order []string
-	for _, f := range files {
+	for _, f := range files.sessions {
 		val, err := summaryCache.get(f, parseSummaryByValue)
 		if err != nil || val.MessageCount == 0 {
 			continue
@@ -386,16 +444,21 @@ func parseSessionFiles(files []sessionFile) []*SessionSummary {
 		groups[s.ID] = append(groups[s.ID], sessionCopy{file: f, summary: s})
 	}
 
+	subagents := map[string][]sessionFile{}
+	for _, f := range files.subagents {
+		subagents[f.parent] = append(subagents[f.parent], f)
+	}
+
 	sessions := make([]*SessionSummary, 0, len(order))
 	for _, id := range order {
-		s := mergeSessionCopies(groups[id])
+		s := mergeSessionCopies(groups[id], subagents[id])
 		sessions = append(sessions, &s)
 	}
 	return sessions
 }
 
 func DiscoverSessions(claudeDir string) ([]*SessionSummary, error) {
-	files, err := enumerateSessionFiles(claudeDir)
+	files, err := enumerateFiles(claudeDir)
 	if err != nil {
 		return nil, err
 	}
@@ -407,10 +470,11 @@ func DiscoverSessions(claudeDir string) ([]*SessionSummary, error) {
 // modified ones, plus the other copies of the same sessions so that their
 // merged totals are complete.
 func DiscoverRecentSessions(claudeDir string, limit int) ([]*SessionSummary, error) {
-	files, err := enumerateSessionFiles(claudeDir)
+	all, err := enumerateFiles(claudeDir)
 	if err != nil {
 		return nil, err
 	}
+	files := all.sessions
 	// Sort by modification time descending (most recent first)
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].modTime.After(files[j].modTime)
@@ -426,14 +490,18 @@ func DiscoverRecentSessions(claudeDir string, limit int) ([]*SessionSummary, err
 		}
 		recent[sessionIDFromPath(f.path)] = true
 	}
-	selected := files[:0:0]
+	var selected sessionFiles
 	for _, f := range files {
 		if recent[sessionIDFromPath(f.path)] {
-			selected = append(selected, f)
+			selected.sessions = append(selected.sessions, f)
 		}
 	}
-	files = selected
-	sessions := parseSessionFiles(files)
+	for _, f := range all.subagents {
+		if recent[f.parent] {
+			selected.subagents = append(selected.subagents, f)
+		}
+	}
+	sessions := parseSessionFiles(selected)
 	sort.SliceStable(sessions, func(i, j int) bool {
 		return sessions[i].LastActivity.After(sessions[j].LastActivity)
 	})
@@ -607,11 +675,11 @@ func ParseSessionFileDaily(path string) (map[string]*SessionAggregate, error) {
 // other days are skipped, even if they belong to a session that was also
 // active today. Responses present in several files are counted once.
 func HourlyTokensToday(claudeDir string) ([24]int, error) {
-	files, err := enumerateSessionFiles(claudeDir)
+	files, err := enumerateFiles(claudeDir)
 	if err != nil {
 		return [24]int{}, err
 	}
-	return hourlyTokens(files, localDate(time.Now())), nil
+	return hourlyTokens(files.all(), localDate(time.Now())), nil
 }
 
 // DiscoverDailyAggregates walks all session files and returns aggregates
@@ -621,11 +689,11 @@ func HourlyTokensToday(claudeDir string) ([24]int, error) {
 // number of distinct session IDs that contributed a counted record on that
 // date.
 func DiscoverDailyAggregates(claudeDir string) (map[string]SessionAggregate, error) {
-	files, err := enumerateSessionFiles(claudeDir)
+	files, err := enumerateFiles(claudeDir)
 	if err != nil {
 		return nil, err
 	}
-	return dailyAggregates(files), nil
+	return dailyAggregates(files.all()), nil
 }
 
 // SessionAggregate holds aggregated token counts and cost across sessions.

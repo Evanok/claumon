@@ -306,7 +306,7 @@ The database uses WAL mode for concurrent reads during writes. No maintenance re
 claumon combines three data sources:
 
 1. **Claude API** (`/api/oauth/usage`) - polled periodically for rate limit utilization. Requires OAuth credentials from `claude /login`.
-2. **Session files** (`~/.claude/projects/*/*.jsonl`) - watched via `fsnotify` for real-time token counting. Each JSONL file is parsed for message-level token usage. A session copied into several files (moved to another project directory, or collected from several machines) is counted once.
+2. **Session files** (`~/.claude/projects/*/*.jsonl`) - watched via `fsnotify` for real-time token counting. Each JSONL file is parsed for message-level token usage. The transcripts of the subagents a session runs (`<session>/subagents/*.jsonl`) add their tokens and cost to that session. A session copied into several files (moved to another project directory, or collected from several machines) is counted once.
 3. **Memory files** (`~/.claude/projects/*/memory/*.md`, `CLAUDE.md`, rules) - discovered and parsed for frontmatter, rendered as HTML, analyzed for cross-references and staleness.
 
 Everything is embedded in a single binary via `//go:embed` - no external files, no Node.js, no build step for the frontend.

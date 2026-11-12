@@ -139,3 +139,32 @@ func TestUsageHubAccept(t *testing.T) {
 		t.Error("due right after a reading")
 	}
 }
+
+func TestUsageHubRestoresAfterRestart(t *testing.T) {
+	hub, _, st := newTestHub(t)
+	body := []byte(`{"five_hour": {"utilization": 42.0, "resets_at": "2099-01-01T10:00:00+00:00"}, "seven_day": {"utilization": 17.0, "resets_at": "2099-01-05T10:00:00+00:00"}}`)
+	if ok, err := hub.AcceptUsage(ingest.PushedUsage{Machine: "laptop", Body: body, FetchedAt: time.Now(), SubscriptionType: "team", RateLimitTier: "max_5x"}); !ok || err != nil {
+		t.Fatalf("accept: %v, %v", ok, err)
+	}
+
+	// A new server on the same store, as after a restart.
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "claude", "projects"), 0o755)
+	srv := server.New(filepath.Join(dir, "claude"), st, os.DirFS(dir), []string{"example.com"})
+	srv.Handlers.RemoteUsageTTL = 7 * time.Hour
+	newUsageHub(st, srv.Broker, srv.Handlers, forecast.NewService(&storeAdapter{st: st}, forecast.DefaultConfig()), time.Hour, 6*time.Hour)
+
+	get := func(url string) map[string]interface{} {
+		w := httptest.NewRecorder()
+		srv.Mux.ServeHTTP(w, httptest.NewRequest("GET", url, nil))
+		var m map[string]interface{}
+		json.NewDecoder(w.Body).Decode(&m)
+		return m
+	}
+	if u := get("/api/usage"); u["session_pct"] != 42.0 || u["weekly_pct"] != 17.0 {
+		t.Errorf("/api/usage after restart = %v", u)
+	}
+	if i := get("/api/info"); i["auth_status"] != "ok" || i["subscription_type"] != "team" {
+		t.Errorf("/api/info after restart = %v", i)
+	}
+}

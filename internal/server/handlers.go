@@ -113,6 +113,15 @@ func (h *Handlers) SetLatestUsage(data map[string]interface{}) {
 	h.usageMu.Unlock()
 }
 
+// RestoreLatestUsage installs a usage payload read back from the store at
+// startup, as of at, the time it was originally fetched.
+func (h *Handlers) RestoreLatestUsage(data map[string]interface{}, at time.Time) {
+	h.usageMu.Lock()
+	h.latestUsage = data
+	h.lastPollOK = at
+	h.usageMu.Unlock()
+}
+
 // ReplaceLatestUsage swaps the cached usage payload without counting as a
 // poll: last_poll_at and any poll error are left alone. Used to re-attach a
 // forecast computed after the fact.

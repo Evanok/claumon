@@ -47,7 +47,28 @@ func newUsageHub(st *store.Store, broker *server.SSEBroker, handlers *server.Han
 	if last, ok, err := st.LatestSnapshotTime(); err == nil && ok {
 		h.last = last
 	}
+	h.restore()
 	return h
+}
+
+// restore shows the newest stored reading after a restart, until agents
+// send a new one, and reports its source's subscription and
+// authentication as when it was fetched.
+func (h *usageHub) restore() {
+	raw, at, ok, err := h.st.LatestUsageSnapshot()
+	if err != nil || !ok {
+		return
+	}
+	usage, err := api.ParseUsage(raw)
+	if err != nil {
+		return
+	}
+	evt := buildUsageEvent(usage)
+	attachForecasts(evt, usage, h.forecast)
+	h.handlers.RestoreLatestUsage(evt, at)
+	if src, ok, err := h.st.LastUsageSource(); err == nil && ok {
+		h.handlers.SetRemoteUsage(src.FetchedAt, src.Subscription, src.Tier)
+	}
 }
 
 // UsageDue reports whether an agent asking now should fetch a reading.
@@ -85,10 +106,14 @@ func (h *usageHub) AcceptUsage(u ingest.PushedUsage) (bool, error) {
 	if err := h.st.SaveUsageSnapshot(usage.SessionPercent, usage.WeeklyPercent, usage.SessionResetAt, usage.WeeklyResetAt, usage.Raw); err != nil {
 		log.Printf("[usage] Failed to save usage snapshot: %v", err)
 	}
+	src := store.UsageSource{FetchedAt: u.FetchedAt, Machine: u.Machine, Subscription: u.SubscriptionType, Tier: u.RateLimitTier}
+	if err := h.st.SaveUsageSource(src); err != nil {
+		log.Printf("[usage] %v", err)
+	}
 	evt := buildUsageEvent(usage)
 	attachForecasts(evt, usage, h.forecast)
 	h.handlers.SetLatestUsage(evt)
-	h.handlers.SetRemoteUsage(time.Now(), u.SubscriptionType, u.RateLimitTier)
+	h.handlers.SetRemoteUsage(u.FetchedAt, u.SubscriptionType, u.RateLimitTier)
 	h.broker.SendJSON("usage", evt)
 	h.broker.SendJSON("auth_status", map[string]string{"status": auth.AuthOK, "message": ""})
 	log.Printf("[usage] Reading from %s: session=%.1f%% weekly=%.1f%%", u.Machine, usage.SessionPercent, usage.WeeklyPercent)

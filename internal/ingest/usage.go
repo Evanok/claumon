@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -189,8 +188,7 @@ func (a *Agent) usageRequest(ctx context.Context, method string, body []byte, he
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("server replied %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+		return replyError(resp)
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }

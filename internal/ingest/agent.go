@@ -279,8 +279,7 @@ func (a *Agent) post(ctx context.Context, rel string, offset, end int64, reset b
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusConflict {
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return 0, 0, fmt.Errorf("server replied %s: %s", resp.Status, strings.TrimSpace(string(msg)))
+		return 0, 0, replyError(resp)
 	}
 	var r offsetReply
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
@@ -289,17 +288,36 @@ func (a *Agent) post(ctx context.Context, rel string, offset, end int64, reset b
 	return resp.StatusCode, r.Offset, nil
 }
 
-// Run syncs every interval until ctx is done. Errors are reported to
-// logf and retried at the next interval.
+// retryWait is the wait before retrying after failures consecutive failed
+// syncs: one minute, doubling, never more than interval, so a server
+// restart does not delay the data by a whole interval.
+func retryWait(failures int, interval time.Duration) time.Duration {
+	wait := time.Minute
+	for i := 1; i < failures && wait < interval; i++ {
+		wait *= 2
+	}
+	return min(wait, interval)
+}
+
+// Run syncs every interval until ctx is done. A failed sync is retried
+// sooner (see retryWait); errors are reported to logf.
 func (a *Agent) Run(ctx context.Context, interval time.Duration, logf func(format string, args ...any)) {
+	failures := 0
 	for {
 		stats, err := a.Sync(ctx)
 		if saveErr := a.State.Save(); saveErr != nil {
 			logf("[agent] Failed to save state: %v", saveErr)
 		}
+		wait := interval
+		if err != nil {
+			failures++
+			wait = retryWait(failures, interval)
+		} else {
+			failures = 0
+		}
 		switch {
 		case err != nil && ctx.Err() == nil:
-			logf("[agent] Sync stopped: %v (retrying in %s)", err, interval)
+			logf("[agent] Sync stopped: %v (retrying in %s)", err, wait)
 		case stats.Files > 0:
 			logf("[agent] Sent %d files: %.1f MB of transcripts, %.1f MB after filtering",
 				stats.Files, float64(stats.SourceSent)/(1<<20), float64(stats.BytesSent)/(1<<20))
@@ -307,7 +325,18 @@ func (a *Agent) Run(ctx context.Context, interval time.Duration, logf func(forma
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(interval):
+		case <-time.After(wait):
 		}
 	}
+}
+
+// replyError describes a failed reply: its status, and its body unless it
+// is an HTML page (a reverse proxy's error page).
+func replyError(resp *http.Response) error {
+	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	text := strings.TrimSpace(string(msg))
+	if text == "" || strings.HasPrefix(text, "<") {
+		return fmt.Errorf("server replied %s", resp.Status)
+	}
+	return fmt.Errorf("server replied %s: %s", resp.Status, text)
 }

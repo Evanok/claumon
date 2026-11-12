@@ -3,6 +3,8 @@ package ingest
 import (
 	"bytes"
 	"context"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -247,5 +249,32 @@ func TestStateSaveLoad(t *testing.T) {
 	os.WriteFile(path, []byte("not json"), 0o600)
 	if got := LoadState(path).Offset(s1); got != 0 {
 		t.Errorf("corrupt state: offset = %d, want 0", got)
+	}
+}
+
+func TestRetryWait(t *testing.T) {
+	interval := 30 * time.Minute
+	for failures, want := range map[int]time.Duration{
+		1: time.Minute, 2: 2 * time.Minute, 3: 4 * time.Minute, 5: 16 * time.Minute, 6: 30 * time.Minute, 20: 30 * time.Minute,
+	} {
+		if got := retryWait(failures, interval); got != want {
+			t.Errorf("retryWait(%d) = %s, want %s", failures, got, want)
+		}
+	}
+	if got := retryWait(3, 90*time.Second); got != 90*time.Second {
+		t.Errorf("short interval: %s", got)
+	}
+}
+
+func TestReplyErrorHidesHTML(t *testing.T) {
+	for body, want := range map[string]string{
+		"<html><body><h1>502 Bad Gateway</h1></body></html>": "server replied 502 Bad Gateway",
+		"invalid ingest token\n":                             "server replied 502 Bad Gateway: invalid ingest token",
+		"":                                                   "server replied 502 Bad Gateway",
+	} {
+		resp := &http.Response{Status: "502 Bad Gateway", Body: io.NopCloser(strings.NewReader(body))}
+		if got := replyError(resp).Error(); got != want {
+			t.Errorf("body %q: %q, want %q", body, got, want)
+		}
 	}
 }

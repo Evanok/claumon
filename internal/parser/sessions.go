@@ -39,10 +39,11 @@ type SessionSummary struct {
 	EstimatedCostUSD  float64   `json:"estimated_cost_usd"`
 	MessageCount      int       `json:"message_count"`
 	CWD               string    `json:"cwd"`
-	// Machine is the machine the session file was collected from; empty for
-	// the local machine, so single-machine API output is unchanged.
+	// Machine is the machine the session file comes from, in multi-machine
+	// mode; empty in single-machine mode, so its API output is unchanged.
 	Machine         string    `json:"machine,omitempty"`
-	// Machines lists the named machines holding a copy of the session.
+	// Machines lists the machines holding a copy of the session, in
+	// multi-machine mode.
 	Machines        []string  `json:"machines,omitempty"`
 	HasFileEdits    bool      `json:"has_file_edits"`
 	CacheEfficiency float64   `json:"cache_efficiency"`
@@ -264,7 +265,7 @@ func normalizeModel(model string) string {
 type sessionFile struct {
 	path    string
 	project string
-	machine string // "" for the local machine
+	machine string // "" in single-machine mode
 	modTime time.Time
 	size    int64
 }

@@ -91,8 +91,8 @@ func mergeSessionCopies(copies []sessionCopy) SessionSummary {
 	return merged
 }
 
-// sessionMachines returns the sorted distinct named machines holding a copy,
-// or nil when every copy is local.
+// sessionMachines returns the sorted distinct machines holding a copy, or
+// nil in single-machine mode, where files carry no machine name.
 func sessionMachines(copies []sessionCopy) []string {
 	seen := map[string]bool{}
 	var machines []string

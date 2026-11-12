@@ -160,6 +160,73 @@ func TestDiscoverSessionsTagsMachine(t *testing.T) {
 	}
 }
 
+// setMachineNamesForTest sets the machine names and clears them when the
+// test ends.
+func setMachineNamesForTest(t *testing.T, local string, aliases map[string]string) {
+	t.Helper()
+	SetMachineNames(local, aliases)
+	t.Cleanup(func() { SetMachineNames("", nil) })
+}
+
+func TestMachineNamesAndAliases(t *testing.T) {
+	base := t.TempDir()
+	claude := filepath.Join(base, "claude")
+	machines := filepath.Join(base, "machines")
+	writeSession(t, filepath.Join(claude, "projects"), "-home-a-proj", "local1")
+	writeSession(t, filepath.Join(machines, "DESKTOP-7QK2", "projects"), "-home-a-proj", "win1")
+	writeSession(t, filepath.Join(machines, "laptop", "projects"), "-home-a-proj", "lap1")
+	// The same machine synced under two directory names, merged by aliases.
+	writeSession(t, filepath.Join(machines, "wsl-old", "projects"), "-home-a-proj", "shared")
+	writeSession(t, filepath.Join(machines, "wsl-new", "projects"), "-home-a-proj", "shared")
+	setMachinesDirForTest(t, machines)
+
+	aliases := map[string]string{
+		"build-host-01": "office",
+		"DESKTOP-7QK2":  "home-windows",
+		"wsl-old":       "home-wsl",
+		"wsl-new":       "home-wsl",
+		"unused":        "",
+	}
+	setMachineNamesForTest(t, "build-host-01", aliases)
+	aliases["laptop"] = "changed after the call" // must not leak in
+
+	sessions, err := DiscoverSessions(claude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, s := range sessions {
+		got[s.ID] = s.Machine + "|" + strings.Join(s.Machines, ",")
+	}
+	want := map[string]string{
+		"local1": "office|office",
+		"win1":   "home-windows|home-windows",
+		"lap1":   "laptop|laptop",
+		"shared": "home-wsl|home-wsl",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("sessions = %v, want %v", got, want)
+	}
+	for id, w := range want {
+		if got[id] != w {
+			t.Errorf("session %s machine|machines = %q, want %q", id, got[id], w)
+		}
+	}
+
+	// Without a machines directory, sessions carry no machine name even when
+	// names are set.
+	SetMachinesDir("")
+	sessions, err = DiscoverSessions(claude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range sessions {
+		if s.Machine != "" || len(s.Machines) != 0 {
+			t.Errorf("single-machine mode: session %s machine=%q machines=%v", s.ID, s.Machine, s.Machines)
+		}
+	}
+}
+
 func TestFindSessionFileMachines(t *testing.T) {
 	base := t.TempDir()
 	claude := filepath.Join(base, "claude")

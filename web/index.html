@@ -1086,6 +1086,7 @@ tr.clickable { cursor: pointer; }
         <thead>
           <tr>
             <th>Project</th>
+            <th id="sessions-machine-col" style="display:none">Machine</th>
             <th>Title</th>
             <th>Model</th>
             <th>Tokens</th>
@@ -1706,6 +1707,10 @@ function renderBillableChart(containerId, data) {
 // --- Sessions Table ---
 function renderSessions(sessions) {
   const tbody = document.getElementById('sessions-table');
+  // The Machine column only exists in multi-machine mode, where every
+  // session carries the machines holding a copy of it.
+  const showMachine = sessions.some(s => (s.machines || []).length);
+  document.getElementById('sessions-machine-col').style.display = showMachine ? '' : 'none';
   const label = sessionRange === 'all' ? 'No recent sessions found' : 'No sessions today';
   if (!sessions.length) {
     tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text-dim);padding:24px">${label}</td></tr>`;
@@ -1716,7 +1721,8 @@ function renderSessions(sessions) {
 
   tbody.innerHTML = sessions.map(s => `
     <tr class="clickable" data-session-id="${s.id}" onclick="openSessionDetail('${s.id}')">
-      <td class="mono" title="${escHtml((s.cwd || s.project) + ((s.machines || []).length ? ' on ' + s.machines.join(', ') : ''))}">${escHtml(shortProject(s.project || s.cwd))}${(s.machines || []).length ? ` <span style="color:var(--text-dim)">@${escHtml(s.machines.join(', '))}</span>` : ''}</td>
+      <td class="mono" title="${escHtml(s.cwd || s.project)}">${escHtml(shortProject(s.project || s.cwd))}</td>
+      ${showMachine ? `<td class="mono">${escHtml((s.machines || []).join(', '))}</td>` : ''}
       <td>${escHtml(s.title || '—')}</td>
       <td><span style="color:var(--purple)">${escHtml(shortModel(s.model))}</span></td>
       <td class="mono">${fmtNum(s.input_tokens + s.output_tokens + s.cache_read_tokens + s.cache_create_tokens)}</td>

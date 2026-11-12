@@ -50,6 +50,19 @@ type Config struct {
 	// as <machines_dir>/<machine>/projects/<project>/*.jsonl. Empty means
 	// single-machine mode.
 	MachinesDir string `json:"machines_dir,omitempty"`
+	// Optional display names for machines in multi-machine mode, keyed by
+	// machine name: the hostname for the local machine, the subdirectory
+	// name under machines_dir for the others.
+	MachineAliases map[string]string `json:"machine_aliases,omitempty"`
+}
+
+// localMachineName names the machine claumon runs on in multi-machine mode:
+// its hostname, or "local" when the hostname is unavailable.
+func localMachineName() string {
+	if name, err := os.Hostname(); err == nil && name != "" {
+		return name
+	}
+	return "local"
 }
 
 func defaultConfig() Config {
@@ -169,7 +182,9 @@ func main() {
 
 	log.Printf("[startup] claumon starting — port=%d claude_dir=%s", cfg.Port, cfg.ClaudeDir)
 	if cfg.MachinesDir != "" {
-		log.Printf("[startup] multi-machine mode — machines_dir=%s", cfg.MachinesDir)
+		local := localMachineName()
+		log.Printf("[startup] multi-machine mode — machines_dir=%s local machine=%s", cfg.MachinesDir, local)
+		parser.SetMachineNames(local, cfg.MachineAliases)
 		parser.SetMachinesDir(cfg.MachinesDir)
 	}
 

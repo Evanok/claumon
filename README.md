@@ -293,7 +293,7 @@ Optional. Create `~/.claumon/config.json`:
 }
 ```
 
-All fields are optional. Defaults are shown above; claumon works without a config file. `retention_days` controls how long usage snapshots and daily aggregates are kept before being pruned. `allowed_hosts` lists extra hostnames claumon answers to besides the loopback ones, for a reverse proxy that keeps the original `Host` header (e.g. `["claumon.example.com"]`). A `pricing_overrides` map can also be set to override per-model pricing, keyed by model ID with `input`, `output`, `cache_read`, `cache_write_5m`, and `cache_write_1h` USD-per-million-token rates. `machines_dir` enables multi-machine mode: claumon also reads the session files collected from other machines under that directory and shows them in one dashboard (see [MULTI_MACHINE.md](MULTI_MACHINE.md)).
+All fields are optional. Defaults are shown above; claumon works without a config file. `retention_days` controls how long usage snapshots and daily aggregates are kept before being pruned. `allowed_hosts` lists extra hostnames claumon answers to besides the loopback ones, for a reverse proxy that keeps the original `Host` header (e.g. `["claumon.example.com"]`). A `pricing_overrides` map can also be set to override per-model pricing, keyed by model ID with `input`, `output`, `cache_read`, `cache_write_5m`, and `cache_write_1h` USD-per-million-token rates. `machines_dir` enables multi-machine mode: claumon also reads the session files collected from other machines under that directory and shows them in one dashboard, with `machine_aliases` to rename machines (see [MULTI_MACHINE.md](MULTI_MACHINE.md)).
 
 ## Data storage
 

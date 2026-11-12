@@ -47,7 +47,8 @@ func TestLoadConfigExpandsTildePaths(t *testing.T) {
 		"claude_dir": "~/claude-sync",
 		"credentials_path": "~/claude-sync/.credentials.json",
 		"db_path": "~/.claumon-test/usage.db",
-		"machines_dir": "~/claumon/machines"
+		"machines_dir": "~/claumon/machines",
+		"machine_aliases": {"DESKTOP-7QK2": "home-windows"}
 	}`
 	if err := os.WriteFile(configPath, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
@@ -66,6 +67,9 @@ func TestLoadConfigExpandsTildePaths(t *testing.T) {
 	}
 	if want := filepath.Join(home, "claumon", "machines"); cfg.MachinesDir != want {
 		t.Errorf("MachinesDir = %q, want %q", cfg.MachinesDir, want)
+	}
+	if got := cfg.MachineAliases["DESKTOP-7QK2"]; got != "home-windows" {
+		t.Errorf("MachineAliases[DESKTOP-7QK2] = %q, want home-windows", got)
 	}
 }
 

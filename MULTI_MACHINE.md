@@ -24,14 +24,14 @@ laid out like a `~/.claude` directory:
         9a71...04.jsonl
 ```
 
-- The machine name is the subdirectory name. It is shown in the dashboard next
-  to the project of each session.
+- The machine name is the subdirectory name. Using each machine's hostname
+  keeps names consistent with the local machine (see below).
 - Only `<machine>/projects/<project>/*.jsonl` files are read. Other files and
   directories are ignored, and so are entries whose name starts with `.`
   (handy for temporary files written during a copy).
-- The local `~/.claude/projects` is still read, and its sessions have no
-  machine name. A server that does not run Claude Code itself can have no
-  local `projects` directory at all.
+- The local `~/.claude/projects` is still read, and its sessions are named
+  after the hostname of the machine claumon runs on. A server that does not
+  run Claude Code itself can have no local `projects` directory at all.
 
 claumon only reads this directory. Copying the files there is up to you, for
 example with `rsync` from each machine:
@@ -54,6 +54,26 @@ or on the command line: `claumon --machines-dir ~/claumon-machines`. The flag
 takes precedence over the config file. The directory must exist when claumon
 starts; machines and projects added later are picked up live.
 
+### Machine names
+
+In multi-machine mode the session list gets a Machine column. A machine is
+named after its hostname (local machine) or its subdirectory name (other
+machines). `machine_aliases` replaces those names with friendlier ones:
+
+```json
+{
+  "machines_dir": "~/claumon-machines",
+  "machine_aliases": {
+    "DESKTOP-7QK2LM": "home-windows",
+    "build-host-01": "office"
+  }
+}
+```
+
+Names without an alias are shown as they are. Two names with the same alias
+are shown as one machine. The local machine's hostname is logged at startup
+(`[startup] multi-machine mode — ... local machine=<hostname>`).
+
 ## How sessions present on several machines are counted
 
 The same session can exist in more than one file: copied to several machines,
@@ -66,8 +86,8 @@ record once:
 - one row per session in the session list, built from all its copies. The
   descriptive fields (title, model, project, machine) come from the most
   complete copy, the one with the latest activity, which is also the copy the
-  session detail view opens. The `machines` field lists every named machine
-  holding a copy.
+  session detail view opens. The `machines` field, shown in the Machine
+  column, lists every machine holding a copy.
 
 A record found in several files is attributed to the file modified earliest,
 the original copy that stopped being written once the session was copied.

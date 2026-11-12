@@ -109,6 +109,8 @@ claumon reads credentials from `~/.claude/.credentials.json` (created by `claude
 | `--db` | Override the DB path (e.g. a copy, to run a test instance) |
 | `--machines-dir` | Also read session files collected from other machines (see [MULTI_MACHINE.md](MULTI_MACHINE.md)) |
 
+`claumon agent` runs the agent that pushes this machine's sessions to a claumon server in multi-machine mode (see [MULTI_MACHINE.md](MULTI_MACHINE.md)).
+
 ## Run as a background service
 
 Run claumon automatically on login so the dashboard is always available. First, move the binary to a permanent location, then register the service.

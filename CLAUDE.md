@@ -29,6 +29,7 @@ Single `main.go` orchestrates 4 goroutines (SSE broker, usage API poller, file w
 - **server** — HTTP routes, handlers, SSE broker
 - **store** — SQLite (WAL mode) for usage snapshots and daily aggregates
 - **watcher** — fsnotify-based file watcher with 500ms debounce; `WatchMachines` adds the multi-machine tree
+- **ingest** — Multi-machine upload protocol: `Receiver` (POST /api/ingest on the server) and `Agent` (`claumon agent`, pushes new complete lines with `SlimLine` filtering); see `MULTI_MACHINE.md`
 
 Frontend is a single `web/index.html` embedded via `//go:embed`. No build step, no external JS deps.
 

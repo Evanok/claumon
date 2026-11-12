@@ -35,12 +35,69 @@ laid out like a `~/.claude` directory:
   after the hostname of the machine claumon runs on. A server that does not
   run Claude Code itself can have no local `projects` directory at all.
 
-claumon only reads this directory. Copying the files there is up to you, for
-example with `rsync` from each machine:
+The files get there in one of two ways: `claumon agent` pushes them from
+each machine (next section), or you copy them yourself, for example with
+`rsync`:
 
 ```bash
 rsync -a ~/.claude/projects/ server:claumon-machines/office-laptop/projects/
 ```
+
+## Pushing sessions with `claumon agent`
+
+`claumon agent` runs on each machine where Claude Code runs and pushes its
+session files to the claumon server over HTTP(S). Every 30 seconds it sends
+the complete lines appended to each session and subagent transcript since
+the previous sync; the server appends them under
+`<machines_dir>/<machine>/projects/...`.
+
+On the server, set one or more tokens next to `machines_dir`. Any random
+string works, for example the output of `openssl rand -hex 32`:
+
+```json
+{
+  "machines_dir": "~/claumon-machines",
+  "ingest_tokens": ["<token>"]
+}
+```
+
+The `POST /api/ingest` route exists only when both are set. On each machine,
+give the agent the server's URL and a token, in `~/.claumon/config.json`:
+
+```json
+{
+  "agent": {
+    "server_url": "https://claumon.example.com",
+    "token": "<token>"
+  }
+}
+```
+
+then run `claumon agent` (or `claumon agent --once` to sync once and exit).
+The flags `--server`, `--token`, `--machine`, `--interval` and `--claude-dir`
+override the config file.
+
+- **Machine name.** The agent sends the machine's hostname, prefixed with
+  `wsl-` under WSL, where the Linux distribution shares the Windows host's
+  hostname. Set `machine` (or `--machine`) to choose another name, and use
+  `machine_aliases` on the server for friendlier display names.
+- **What is sent.** Only complete lines: a line still being written waits for
+  the next sync. Lines claumon never reads are left out (the `api-request`
+  lines, the base64 data of images, and the `toolUseResult` field, a copy of
+  the tool results already in the messages): about 70% of the size on real
+  transcripts, with identical totals and session views. The copy keeps the
+  source file's modification time, which decides how a session found on
+  several machines is attributed.
+- **Resuming.** The server records how far it received each file, and the
+  agent records it in `~/.claumon/agent-state.json`. An interrupted upload
+  resumes where it stopped; when either side lost its records, the server's
+  answer puts the agent back in step, and an agent checks every file with the
+  server when it starts. Deleting a transcript on a machine never deletes the
+  server's copy: the server is the archive.
+- **Reverse proxy.** Agents authenticate with their token
+  (`Authorization: Bearer`). A proxy that protects the dashboard with its own
+  authentication must let `/api/ingest` through, and the proxy's hostname
+  must be in `allowed_hosts`.
 
 ## Configuration
 

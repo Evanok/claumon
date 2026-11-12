@@ -12,8 +12,13 @@ import (
 // name cannot hold are replaced by '-'.
 func DefaultMachineName() string {
 	host, _ := os.Hostname()
+	return machineName(host, IsWSL())
+}
+
+// IsWSL reports whether this process runs in a WSL distribution.
+func IsWSL() bool {
 	osrelease, _ := os.ReadFile("/proc/sys/kernel/osrelease")
-	return machineName(host, os.Getenv("WSL_DISTRO_NAME") != "" || isWSLKernel(string(osrelease)))
+	return os.Getenv("WSL_DISTRO_NAME") != "" || isWSLKernel(string(osrelease))
 }
 
 func isWSLKernel(osrelease string) bool {

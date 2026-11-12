@@ -77,6 +77,22 @@ then run `claumon agent` (or `claumon agent --once` to sync once and exit).
 The flags `--server`, `--token`, `--machine`, `--interval` and `--claude-dir`
 override the config file.
 
+To start the agent automatically, run `claumon agent install` once the
+`agent` section is set (`claumon agent status` and `claumon agent uninstall`
+check and undo it):
+
+- **Linux with systemd:** a user unit, `claumon-agent`
+  (logs: `journalctl --user -u claumon-agent`).
+- **WSL without systemd:** a block in `~/.profile` starts the agent in the
+  background when a WSL shell opens, the only time Claude Code can run there.
+  Only one agent runs at a time, so opening more shells is harmless. Logs go
+  to `~/.claumon/agent.log`.
+- **Windows:** a script in the Startup folder starts it hidden at logon.
+  Logs go to `%USERPROFILE%\.claumon\agent.log`. `claumon service uninstall`
+  and the dashboard's self-update stop every `claumon.exe`, the agent
+  included; it starts again at the next logon.
+- **macOS:** not supported yet; run `claumon agent` from a LaunchAgent.
+
 - **Machine name.** The agent sends the machine's hostname, prefixed with
   `wsl-` under WSL, where the Linux distribution shares the Windows host's
   hostname. Set `machine` (or `--machine`) to choose another name, and use

@@ -2,6 +2,8 @@ package main
 
 import (
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -68,5 +70,43 @@ func TestParseAgentOptions(t *testing.T) {
 	noInterval.Agent.IntervalSecs = 0
 	if got, _ := parseAgentOptions(noInterval, nil, io.Discard); got.interval != defaultAgentInterval {
 		t.Errorf("default interval = %s", got.interval)
+	}
+}
+
+func TestLockAgent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.lock")
+	unlock, err := lockAgent(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockAgent(path); err == nil {
+		t.Error("second lock succeeded while the first is held")
+	}
+	unlock()
+	unlock2, err := lockAgent(path)
+	if err != nil {
+		t.Fatalf("lock after unlock: %v", err)
+	}
+	unlock2()
+}
+
+func TestOpenAgentLogRotates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "logs", "agent.log")
+	f, err := openAgentLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Write(make([]byte, maxAgentLogBytes+1))
+	f.Close()
+	f, err = openAgentLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if info, err := os.Stat(path); err != nil || info.Size() != 0 {
+		t.Errorf("log after rotation: %v, %v", info, err)
+	}
+	if info, err := os.Stat(path + ".old"); err != nil || info.Size() != maxAgentLogBytes+1 {
+		t.Errorf("rotated log: %v, %v", info, err)
 	}
 }

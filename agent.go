@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/fabioconcina/claumon/internal/ingest"
+	"github.com/fabioconcina/claumon/internal/service"
 )
 
 // AgentConfig configures `claumon agent`, which pushes this machine's
@@ -35,6 +36,7 @@ type agentOptions struct {
 	once                      bool
 	statePath                 string
 	claudeDir                 string
+	logFile                   string
 }
 
 // parseAgentOptions resolves the agent settings: command-line flags over the
@@ -49,8 +51,10 @@ func parseAgentOptions(cfg Config, args []string, stderr io.Writer) (agentOption
 	once := fs.Bool("once", false, "sync once and exit")
 	statePath := fs.String("state", filepath.Join(filepath.Dir(cfg.DBPath), "agent-state.json"), "file recording what was sent")
 	claudeDir := fs.String("claude-dir", cfg.ClaudeDir, "Claude directory whose projects are pushed")
+	logFile := fs.String("log-file", "", "append logs to this file instead of stderr")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: claumon agent [flags]")
+		fmt.Fprintln(stderr, "       claumon agent install|uninstall|status")
 		fmt.Fprintln(stderr, "Pushes this machine's Claude Code session files to a claumon server (see MULTI_MACHINE.md).")
 		fs.PrintDefaults()
 	}
@@ -61,6 +65,7 @@ func parseAgentOptions(cfg Config, args []string, stderr io.Writer) (agentOption
 	o := agentOptions{
 		serverURL: *server, token: *token, machine: *machine,
 		interval: *interval, once: *once, statePath: *statePath, claudeDir: expandHome(*claudeDir, homeDir()),
+		logFile: expandHome(*logFile, homeDir()),
 	}
 	if o.interval <= 0 && cfg.Agent.IntervalSecs > 0 {
 		o.interval = time.Duration(cfg.Agent.IntervalSecs) * time.Second
@@ -82,6 +87,13 @@ func parseAgentOptions(cfg Config, args []string, stderr io.Writer) (agentOption
 
 func runAgent() {
 	cfg := loadConfig()
+	if len(os.Args) > 2 {
+		switch os.Args[2] {
+		case "install", "uninstall", "status":
+			runAgentService(cfg, os.Args[2])
+			return
+		}
+	}
 	o, err := parseAgentOptions(cfg, os.Args[2:], os.Stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return
@@ -90,6 +102,25 @@ func runAgent() {
 		fmt.Fprintf(os.Stderr, "claumon agent: %v\n", err)
 		os.Exit(2)
 	}
+
+	if o.logFile != "" {
+		f, err := openAgentLog(o.logFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "claumon agent: %v\n", err)
+			os.Exit(1)
+		}
+		defer f.Close()
+		log.SetOutput(f)
+	}
+
+	// One agent per machine: a second one (another shell, a restart racing
+	// the old process) exits quietly.
+	unlock, err := lockAgent(filepath.Join(filepath.Dir(o.statePath), "agent.lock"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "claumon agent: %v\n", err)
+		return
+	}
+	defer unlock()
 
 	a := &ingest.Agent{
 		ClaudeDir: o.claudeDir,
@@ -126,4 +157,59 @@ func runAgent() {
 func homeDir() string {
 	home, _ := os.UserHomeDir()
 	return home
+}
+
+// maxAgentLogBytes is the size above which the agent log is rotated at
+// startup, keeping one previous file.
+const maxAgentLogBytes = 5 << 20
+
+// openAgentLog opens the agent log for appending, after moving a log larger
+// than maxAgentLogBytes to <path>.old.
+func openAgentLog(path string) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	if info, err := os.Stat(path); err == nil && info.Size() > maxAgentLogBytes {
+		os.Rename(path, path+".old")
+	}
+	return os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+}
+
+// runAgentService handles claumon agent install, uninstall and status.
+func runAgentService(cfg Config, action string) {
+	switch action {
+	case "install":
+		// Refuse to install an agent that would fail at every start.
+		o, err := parseAgentOptions(cfg, nil, io.Discard)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "claumon agent install: %v\n", err)
+			os.Exit(1)
+		}
+		execPath, err := os.Executable()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "claumon agent install: resolving the executable: %v\n", err)
+			os.Exit(1)
+		}
+		how, err := service.InstallAgent(execPath, ingest.IsWSL())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "claumon agent install: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("claumon agent installed: pushes this machine as %q to %s\n", o.machine, o.serverURL)
+		fmt.Printf("Starts with: %s\n", how)
+		fmt.Println("To remove:   claumon agent uninstall")
+	case "uninstall":
+		if err := service.UninstallAgent(); err != nil {
+			fmt.Fprintf(os.Stderr, "claumon agent uninstall: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("claumon agent removed from startup.")
+	case "status":
+		how := service.AgentInstalled()
+		if how == "" {
+			fmt.Println("Agent: not installed")
+			return
+		}
+		fmt.Printf("Agent: installed (%s)\n", how)
+	}
 }

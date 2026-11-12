@@ -29,7 +29,9 @@ type AgentConfig struct {
 	IntervalSecs int    `json:"interval_seconds,omitempty"`
 }
 
-const defaultAgentInterval = 30 * time.Second
+// defaultAgentInterval is the time between two syncs of the session files.
+// A sync with nothing new sends nothing.
+const defaultAgentInterval = 30 * time.Minute
 
 // agentOptions are the resolved settings of an agent run.
 type agentOptions struct {
@@ -50,7 +52,7 @@ func parseAgentOptions(cfg Config, args []string, stderr io.Writer) (agentOption
 	server := fs.String("server", cfg.Agent.ServerURL, "URL of the claumon server")
 	token := fs.String("token", cfg.Agent.Token, "ingest token, one of the server's ingest_tokens")
 	machine := fs.String("machine", cfg.Agent.Machine, "machine name (default: hostname, wsl-<hostname> under WSL)")
-	interval := fs.Duration("interval", 0, "time between two syncs (default 30s)")
+	interval := fs.Duration("interval", 0, "time between two syncs of the session files (default 30m)")
 	once := fs.Bool("once", false, "sync once and exit")
 	noUsage := fs.Bool("no-usage", false, "do not fetch the usage gauges for the server")
 	statePath := fs.String("state", filepath.Join(filepath.Dir(cfg.DBPath), "agent-state.json"), "file recording what was sent")

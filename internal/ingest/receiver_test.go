@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -187,6 +188,24 @@ func TestReceiver(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(filepath.Join(dir, "office", filepath.FromSlash(sub))); string(data) != "s\n" {
 		t.Errorf("subagent file = %q", data)
+	}
+}
+
+func TestReceiverInvalidMtime(t *testing.T) {
+	rc := NewReceiver(t.TempDir(), []string{"k"}, &memOffsets{})
+	for _, v := range []string{"yesterday", "-5", "0"} {
+		req := httptest.NewRequest("POST", "/api/ingest", strings.NewReader("a\n"))
+		req.Header.Set("Authorization", "Bearer k")
+		req.Header.Set(HeaderMachine, "m")
+		req.Header.Set(HeaderPath, "projects/-p/s.jsonl")
+		req.Header.Set(HeaderOffset, "0")
+		req.Header.Set(HeaderEnd, "2")
+		req.Header.Set(HeaderMtime, v)
+		w := httptest.NewRecorder()
+		rc.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("mtime %q: status = %d, want 400", v, w.Code)
+		}
 	}
 }
 

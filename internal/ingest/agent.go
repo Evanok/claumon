@@ -117,7 +117,7 @@ func (a *Agent) syncFile(ctx context.Context, rel string, verify bool) (sent, ke
 	if err != nil {
 		return 0, 0, nil // deleted meanwhile: nothing to send, never deleted remotely
 	}
-	size := info.Size()
+	size, mtime := info.Size(), info.ModTime()
 	offset := a.State.Offset(rel)
 	reset := false
 	if size < offset {
@@ -136,7 +136,7 @@ func (a *Agent) syncFile(ctx context.Context, rel string, verify bool) (sent, ke
 		}
 		verify = false
 		body := a.filter(chunk)
-		status, serverOffset, err := a.post(ctx, rel, offset, end, reset, body)
+		status, serverOffset, err := a.post(ctx, rel, offset, end, reset, body, mtime)
 		if err != nil {
 			return sent, kept, err
 		}
@@ -244,7 +244,7 @@ func (a *Agent) filter(chunk []byte) []byte {
 
 // post sends one chunk and returns the reply status (200 or 409) and the
 // server's offset.
-func (a *Agent) post(ctx context.Context, rel string, offset, end int64, reset bool, body []byte) (int, int64, error) {
+func (a *Agent) post(ctx context.Context, rel string, offset, end int64, reset bool, body []byte, mtime time.Time) (int, int64, error) {
 	var gz bytes.Buffer
 	zw := gzip.NewWriter(&gz)
 	zw.Write(body)
@@ -267,6 +267,7 @@ func (a *Agent) post(ctx context.Context, rel string, offset, end int64, reset b
 	if reset {
 		req.Header.Set(HeaderReset, "1")
 	}
+	req.Header.Set(HeaderMtime, strconv.FormatInt(mtime.UnixNano(), 10))
 
 	client := a.Client
 	if client == nil {

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // testServer runs a Receiver behind an HTTP server.
@@ -104,6 +105,26 @@ func TestAgentSync(t *testing.T) {
 	src, _ := os.ReadFile(filepath.Join(claude, filepath.FromSlash(s1)))
 	if srv.stored(s1) != string(src) {
 		t.Errorf("after append: s1 = %q, want %q", srv.stored(s1), src)
+	}
+}
+
+func TestAgentKeepsModificationTime(t *testing.T) {
+	srv := newTestServer(t)
+	claude := t.TempDir()
+	writeSrc(t, claude, s1, "{\"n\":1}\n")
+	mtime := time.Date(2026, 11, 3, 14, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(filepath.Join(claude, filepath.FromSlash(s1)), mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newAgent(claude, srv.http.URL).Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(srv.dir, "m", filepath.FromSlash(s1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(mtime) {
+		t.Errorf("copy mtime = %s, want the source's %s", info.ModTime(), mtime)
 	}
 }
 

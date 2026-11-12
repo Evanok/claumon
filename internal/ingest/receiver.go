@@ -16,12 +16,18 @@
 //	                                    the body can be shorter)
 //	X-Claumon-Reset: 1                  optional: the source file shrank;
 //	                                    replace the stored file (Offset is 0)
+//	X-Claumon-Mtime: <unix nanoseconds> optional: modification time of the
+//	                                    source file, given to the copy
 //	Content-Encoding: gzip              optional
 //
 // The server keeps, per machine and file, the source offset received so far.
 // A chunk must start there: otherwise the reply is 409 with the expected
 // offset, and the agent resends from it. A successful reply is 200 with the
 // new offset. Both bodies are {"offset": n}.
+//
+// The copy keeps the source's modification time: the parser attributes a
+// record found in several copies of a session to the copy modified first,
+// the original, and arrival times would make that depend on upload order.
 package ingest
 
 import (
@@ -40,6 +46,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Header names of the protocol.
@@ -49,6 +56,7 @@ const (
 	HeaderOffset  = "X-Claumon-Offset"
 	HeaderEnd     = "X-Claumon-End"
 	HeaderReset   = "X-Claumon-Reset"
+	HeaderMtime   = "X-Claumon-Mtime"
 )
 
 // Limits on one request: the compressed body as sent, and the chunk once
@@ -148,6 +156,15 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	offset, errOffset := strconv.ParseInt(r.Header.Get(HeaderOffset), 10, 64)
 	end, errEnd := strconv.ParseInt(r.Header.Get(HeaderEnd), 10, 64)
 	reset := r.Header.Get(HeaderReset) == "1"
+	var mtime time.Time
+	if v := r.Header.Get(HeaderMtime); v != "" {
+		ns, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || ns <= 0 {
+			http.Error(w, "invalid modification time", http.StatusBadRequest)
+			return
+		}
+		mtime = time.Unix(0, ns)
+	}
 	switch {
 	case !ValidMachineName(machine):
 		http.Error(w, "invalid machine name", http.StatusBadRequest)
@@ -187,7 +204,7 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := rc.write(machine, relPath, chunk, reset); err != nil {
+	if err := rc.write(machine, relPath, chunk, reset, mtime); err != nil {
 		log.Printf("[ingest] Failed to write %s/%s: %v", machine, relPath, err)
 		http.Error(w, "writing the file failed", http.StatusInternalServerError)
 		return
@@ -231,8 +248,8 @@ func readChunk(r *http.Request) ([]byte, error) {
 }
 
 // write appends chunk to the machine's copy of the file, or replaces the copy
-// when reset is set.
-func (rc *Receiver) write(machine, relPath string, chunk []byte, reset bool) error {
+// when reset is set, then gives it mtime when set.
+func (rc *Receiver) write(machine, relPath string, chunk []byte, reset bool, mtime time.Time) error {
 	target := filepath.Join(rc.dir, machine, filepath.FromSlash(path.Clean(relPath)))
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
@@ -249,5 +266,11 @@ func (rc *Receiver) write(machine, relPath string, chunk []byte, reset bool) err
 		f.Close()
 		return err
 	}
-	return f.Close()
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if !mtime.IsZero() {
+		return os.Chtimes(target, mtime, mtime)
+	}
+	return nil
 }

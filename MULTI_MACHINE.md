@@ -214,6 +214,15 @@ banner when the total goes above it:
 
 The limit only warns; freeing space is up to you.
 
+With agents (`ingest_tokens` set), the server can also compress the files of
+inactive sessions: with `"compress_after_days": 1`, every hour it compresses
+the session files not modified for a day into `<name>.jsonl.gz`, which
+claumon reads like the plain files. On real transcripts, already slimmed by
+the agents, this divided their size by about four. When a compressed session
+resumes, the server restores the file before appending the new lines. Leave
+the option off when the files are copied with `rsync`: rsync would send the
+compressed files again in full.
+
 ## Limitations
 
 - Usage gauges (rate limits) come from the credentials of the machine claumon

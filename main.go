@@ -61,6 +61,9 @@ type Config struct {
 	// Tokens agents present to push session files to POST /api/ingest
 	// (multi-machine mode). Empty disables the route.
 	IngestTokens []string `json:"ingest_tokens,omitempty"`
+	// Compress the files received from agents once their session has been
+	// inactive for this many days (0: never). Requires ingest_tokens.
+	CompressAfterDays int `json:"compress_after_days,omitempty"`
 	// Settings of `claumon agent` on the machines that push their sessions.
 	Agent AgentConfig `json:"agent,omitempty"`
 }
@@ -228,12 +231,17 @@ func main() {
 	srv.Handlers.StuckThreshold = time.Duration(cfg.StuckThresholdMins) * time.Minute
 	srv.Handlers.HistoryMaxDays = cfg.RetentionDays
 	srv.Handlers.MaxStorageMB = cfg.MaxStorageMB
+	var receiver *ingest.Receiver
 	switch {
 	case len(cfg.IngestTokens) > 0 && cfg.MachinesDir == "":
 		log.Printf("[ingest] ingest_tokens is set but machines_dir is not: agent uploads are disabled")
 	case len(cfg.IngestTokens) > 0:
-		srv.HandleIngest(ingest.NewReceiver(cfg.MachinesDir, cfg.IngestTokens, st))
+		receiver = ingest.NewReceiver(cfg.MachinesDir, cfg.IngestTokens, st)
+		srv.HandleIngest(receiver)
 		log.Printf("[ingest] Accepting agent uploads into %s (%d tokens)", cfg.MachinesDir, len(cfg.IngestTokens))
+	}
+	if cfg.CompressAfterDays > 0 && receiver == nil {
+		log.Printf("[ingest] compress_after_days needs ingest_tokens and machines_dir: compression is disabled")
 	}
 	if cfg.MachinesDir != "" {
 		if report, err := srv.Handlers.StorageReport(); err != nil {
@@ -265,6 +273,10 @@ func main() {
 
 	// Start SSE broker
 	go srv.Broker.Run(ctx)
+
+	if receiver != nil && cfg.CompressAfterDays > 0 {
+		go compressInactiveLoop(ctx, receiver, time.Duration(cfg.CompressAfterDays)*24*time.Hour)
+	}
 
 	// Start usage poller (provider handles credential reload on expiry)
 	if provider.HasToken() {

@@ -51,7 +51,8 @@ func TestLoadConfigExpandsTildePaths(t *testing.T) {
 		"machines_dir": "~/claumon/machines",
 		"machine_aliases": {"DESKTOP-7QK2": "home-windows"},
 		"max_storage_mb": 2048,
-		"ingest_tokens": ["t1", "t2"]
+		"ingest_tokens": ["t1", "t2"],
+		"compress_after_days": 2
 	}`
 	if err := os.WriteFile(configPath, []byte(data), 0o600); err != nil {
 		t.Fatal(err)
@@ -79,6 +80,9 @@ func TestLoadConfigExpandsTildePaths(t *testing.T) {
 	}
 	if strings.Join(cfg.IngestTokens, ",") != "t1,t2" {
 		t.Errorf("IngestTokens = %v, want [t1 t2]", cfg.IngestTokens)
+	}
+	if cfg.CompressAfterDays != 2 {
+		t.Errorf("CompressAfterDays = %d, want 2", cfg.CompressAfterDays)
 	}
 }
 

@@ -248,11 +248,23 @@ func readChunk(r *http.Request) ([]byte, error) {
 }
 
 // write appends chunk to the machine's copy of the file, or replaces the copy
-// when reset is set, then gives it mtime when set.
+// when reset is set, then gives it mtime when set. A compressed copy is
+// restored before an append and dropped by a reset. An empty chunk that is
+// not a reset (an agent checking its offset) leaves the file alone.
 func (rc *Receiver) write(machine, relPath string, chunk []byte, reset bool, mtime time.Time) error {
+	if len(chunk) == 0 && !reset {
+		return nil
+	}
 	target := filepath.Join(rc.dir, machine, filepath.FromSlash(path.Clean(relPath)))
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err
+	}
+	if reset {
+		if err := os.Remove(target + ".gz"); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	} else if err := restoreCompressed(target); err != nil {
+		return fmt.Errorf("restoring the compressed copy: %w", err)
 	}
 	flags := os.O_WRONLY | os.O_CREATE | os.O_APPEND
 	if reset {

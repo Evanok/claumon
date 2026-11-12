@@ -96,8 +96,7 @@ This file is fork-only: leave it out of upstream pull requests.
 - **Evidence:** real Windows session: project
   `C:/Users/User/work/mode/warhammer3/WH3/Dump/Fork/revive/boring/campaign`,
   cwd `C:\Users\User\work\mode_warhammer3\WH3-Dump-Fork\revive_boring_campaign`.
-- **Fix:** see the commit "UI: show session projects from their working
-  directory".
+- **Fix:** `844f1a5`.
 
 ## Found, not fixed
 

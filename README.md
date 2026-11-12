@@ -299,7 +299,7 @@ All fields are optional. Defaults are shown above; claumon works without a confi
 
 claumon stores usage snapshots and daily aggregates in a SQLite database at `~/.claumon/usage.db`. Historical data is backfilled automatically on first startup by scanning all existing session files.
 
-The database uses WAL mode for concurrent reads during writes. No maintenance required: data older than 90 days (configurable via `retention_days`) is pruned automatically.
+The database uses WAL mode for concurrent reads during writes. No maintenance required: data older than 90 days (configurable via `retention_days`) is pruned automatically. Daily totals outlive the transcripts they were computed from: when Claude Code deletes old transcripts, a day that would be recomputed with fewer messages keeps its stored totals.
 
 ## How it works
 

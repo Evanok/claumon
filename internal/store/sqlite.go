@@ -199,6 +199,30 @@ func (s *Store) UpsertDailyAggregate(agg DailyAggregate) error {
 	return nil
 }
 
+// DailyMessageCounts returns the stored message count of every day in
+// daily_aggregates, keyed by date.
+func (s *Store) DailyMessageCounts() (map[string]int, error) {
+	rows, err := s.db.Query("SELECT date, message_count FROM daily_aggregates")
+	if err != nil {
+		return nil, fmt.Errorf("querying daily message counts: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int)
+	for rows.Next() {
+		var date string
+		var n int
+		if err := rows.Scan(&date, &n); err != nil {
+			return nil, fmt.Errorf("scanning daily message count: %w", err)
+		}
+		counts[date] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating daily message counts: %w", err)
+	}
+	return counts, nil
+}
+
 func (s *Store) Prune(retentionDays int) error {
 	cutoff := time.Now().AddDate(0, 0, -retentionDays).Format("2006-01-02")
 

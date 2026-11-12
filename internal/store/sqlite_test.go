@@ -92,6 +92,30 @@ func TestUpsertOverwrites(t *testing.T) {
 	}
 }
 
+func TestDailyMessageCounts(t *testing.T) {
+	st := openTestStore(t)
+
+	counts, err := st.DailyMessageCounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(counts) != 0 {
+		t.Errorf("empty store: counts = %v, want none", counts)
+	}
+
+	st.UpsertDailyAggregate(DailyAggregate{Date: "2026-01-02", MessageCount: 12})
+	st.UpsertDailyAggregate(DailyAggregate{Date: "2026-01-03", MessageCount: 0})
+	st.UpsertDailyAggregate(DailyAggregate{Date: "2026-01-02", MessageCount: 15})
+
+	counts, err = st.DailyMessageCounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(counts) != 2 || counts["2026-01-02"] != 15 || counts["2026-01-03"] != 0 {
+		t.Errorf("counts = %v, want map[2026-01-02:15 2026-01-03:0]", counts)
+	}
+}
+
 func TestSaveUsageSnapshot(t *testing.T) {
 	st := openTestStore(t)
 

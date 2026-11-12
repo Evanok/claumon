@@ -96,7 +96,9 @@ the original copy that stopped being written once the session was copied.
 
 Daily aggregates are rewritten for every day whose totals change, so files
 that arrive late, or sessions that add records to earlier days, update the
-history while claumon runs.
+history while claumon runs. A day whose recomputed message count is lower
+than the stored one is left as stored: some of its transcripts were deleted
+(Claude Code removes old ones), and the store keeps the history.
 
 ## Limitations
 

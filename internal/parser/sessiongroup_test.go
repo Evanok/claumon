@@ -3,6 +3,7 @@ package parser
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -141,6 +142,33 @@ func TestDiscoverRecentSessionsIncludesOlderCopies(t *testing.T) {
 	// but is a distinct session).
 	if got := strings.Join(ids, ","); got != "s1,s3" {
 		t.Errorf("sessions = %s, want s1,s3", got)
+	}
+}
+
+func TestDiscoverRecentSessionsLimitsBySession(t *testing.T) {
+	base := t.TempDir()
+	t0 := time.Date(2026, 3, 20, 13, 0, 0, 0, time.UTC)
+	writeLedgerFiles(t, base, []ledgerFile{
+		{"claude/projects/-p/s3.jsonl", []string{ledgerUser2, ledgerResp2}, t0},
+		{"claude/projects/-p/s2.jsonl", []string{ledgerLegacyUser, ledgerLegacyResp}, t0.Add(time.Hour)},
+		// The two most recent files are copies of s1: they must take one
+		// place of the limit, not two.
+		{"claude/projects/-old/s1.jsonl", []string{ledgerUser1, ledgerResp1}, t0.Add(2 * time.Hour)},
+		{"machines/home/projects/-old/s1.jsonl", []string{ledgerUser1, ledgerResp1}, t0.Add(3 * time.Hour)},
+	})
+	setMachinesDirForTest(t, filepath.Join(base, "machines"))
+
+	sessions, err := DiscoverRecentSessions(filepath.Join(base, "claude"), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, s := range sessions {
+		ids = append(ids, s.ID)
+	}
+	sort.Strings(ids)
+	if got := strings.Join(ids, ","); got != "s1,s2" {
+		t.Errorf("sessions = %s, want s1,s2", got)
 	}
 }
 

@@ -414,19 +414,24 @@ func DiscoverRecentSessions(claudeDir string, limit int) ([]*SessionSummary, err
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].modTime.After(files[j].modTime)
 	})
-	if len(files) > limit {
-		recent := map[string]bool{}
-		for _, f := range files[:limit] {
-			recent[sessionIDFromPath(f.path)] = true
+	// Keep the files of the limit most recently modified sessions. Selecting
+	// by session rather than by file keeps the copies of a session (other
+	// machines, moved project directories) from taking the places of other
+	// sessions.
+	recent := map[string]bool{}
+	for _, f := range files {
+		if len(recent) == limit {
+			break
 		}
-		selected := files[:limit:limit]
-		for _, f := range files[limit:] {
-			if recent[sessionIDFromPath(f.path)] {
-				selected = append(selected, f)
-			}
-		}
-		files = selected
+		recent[sessionIDFromPath(f.path)] = true
 	}
+	selected := files[:0:0]
+	for _, f := range files {
+		if recent[sessionIDFromPath(f.path)] {
+			selected = append(selected, f)
+		}
+	}
+	files = selected
 	sessions := parseSessionFiles(files)
 	sort.SliceStable(sessions, func(i, j int) bool {
 		return sessions[i].LastActivity.After(sessions[j].LastActivity)

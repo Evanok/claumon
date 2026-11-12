@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fabioconcina/claumon/internal/parser"
 	"github.com/fabioconcina/claumon/internal/store"
 )
 
@@ -20,6 +21,39 @@ type recordingWriter struct {
 	fail      map[string]bool
 	stored    map[string]int
 	countsErr error
+
+	machineWrites []store.MachineDay
+	machineStored map[store.MachineDay]int
+}
+
+func (w *recordingWriter) UpsertMachineDailyAggregate(machine string, agg store.DailyAggregate) error {
+	k := store.MachineDay{Date: agg.Date, Machine: machine}
+	w.machineWrites = append(w.machineWrites, k)
+	if w.machineStored == nil {
+		w.machineStored = map[store.MachineDay]int{}
+	}
+	w.machineStored[k] = agg.MessageCount
+	return nil
+}
+
+func (w *recordingWriter) MachineDailyMessageCounts() (map[store.MachineDay]int, error) {
+	out := map[store.MachineDay]int{}
+	for k, v := range w.machineStored {
+		out[k] = v
+	}
+	return out, nil
+}
+
+// takeMachineRows returns the machine rows written since the previous call,
+// as sorted "date/machine" strings.
+func (w *recordingWriter) takeMachineRows() []string {
+	var rows []string
+	for _, k := range w.machineWrites {
+		rows = append(rows, k.Date+"/"+k.Machine)
+	}
+	w.machineWrites = nil
+	sort.Strings(rows)
+	return rows
 }
 
 func (w *recordingWriter) UpsertDailyAggregate(agg store.DailyAggregate) error {
@@ -224,6 +258,69 @@ func TestDailyAggregateSyncNeedsStoredCounts(t *testing.T) {
 	w.countsErr = nil
 	if n := s.sync(); n != 1 {
 		t.Errorf("retry wrote %d days, want 1", n)
+	}
+}
+
+func TestDailyAggregateSyncMachines(t *testing.T) {
+	today := localNoon(0).Format("2006-01-02")
+	d2 := localNoon(2).Format("2006-01-02")
+
+	base := t.TempDir()
+	claudeDir := filepath.Join(base, "claude")
+	machines := filepath.Join(base, "machines")
+	writeTranscript(t, claudeDir, "-p", "s1", exchange("1", localNoon(2), 10))
+	office := filepath.Join(machines, "office")
+	s2 := writeTranscript(t, office, "-p", "s2", exchange("2", localNoon(2), 20)+exchange("3", localNoon(0), 30))
+
+	// Single-machine mode writes no machine rows.
+	w := &recordingWriter{}
+	newDailyAggregateSync(claudeDir, w).sync()
+	if rows := w.takeMachineRows(); len(rows) != 0 {
+		t.Fatalf("single-machine mode wrote machine rows %v", rows)
+	}
+
+	parser.SetMachinesDir(machines)
+	parser.SetMachineNames("laptop", map[string]string{"office": "work"})
+	t.Cleanup(func() {
+		parser.SetMachinesDir("")
+		parser.SetMachineNames("", nil)
+	})
+
+	w = &recordingWriter{}
+	s := newDailyAggregateSync(claudeDir, w)
+	steps := []struct {
+		name   string
+		change func(t *testing.T)
+		want   []string
+	}{
+		{"first sync writes every machine day", func(*testing.T) {}, []string{d2 + "/laptop", d2 + "/work", today + "/work"}},
+		{"no change writes nothing", func(*testing.T) {}, nil},
+		{
+			"a machine's records added to a past day",
+			func(t *testing.T) {
+				writeTranscript(t, office, "-p", "s4", exchange("4", localNoon(2), 40))
+			},
+			[]string{d2 + "/work"},
+		},
+		{
+			"a machine's transcript deleted: its stored days are kept",
+			func(t *testing.T) {
+				if err := os.Remove(s2); err != nil {
+					t.Fatal(err)
+				}
+			},
+			nil,
+		},
+	}
+	for _, st := range steps {
+		st.change(t)
+		s.sync()
+		if got := w.takeMachineRows(); strings.Join(got, ",") != strings.Join(st.want, ",") {
+			t.Errorf("%s: wrote %v, want %v", st.name, got, st.want)
+		}
+	}
+	if got := w.machineStored[store.MachineDay{Date: d2, Machine: "work"}]; got != 4 {
+		t.Errorf("stored messages for %s/work = %d, want 4", d2, got)
 	}
 }
 

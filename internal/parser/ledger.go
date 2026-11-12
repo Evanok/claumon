@@ -37,7 +37,7 @@ var ledgerCache = newFileCache[fileLedger]()
 // parseSessionLedger reads the records of a session file that carry a
 // timestamp. Lines without one are skipped, as they cannot be bucketed.
 func parseSessionLedger(path string) (fileLedger, error) {
-	f, err := os.Open(path)
+	f, err := openSessionFile(path)
 	if err != nil {
 		return fileLedger{}, fmt.Errorf("opening session file: %w", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"os"
@@ -102,21 +103,21 @@ type jsonlLine struct {
 }
 
 // newSessionScanner creates a scanner for reading JSONL session files with a 2MB line limit.
-func newSessionScanner(f *os.File) *bufio.Scanner {
+func newSessionScanner(f io.Reader) *bufio.Scanner {
 	s := bufio.NewScanner(f)
 	s.Buffer(make([]byte, 0, 256*1024), 10*1024*1024) // 10MB: Claude sessions can have very large tool-result lines
 	return s
 }
 
 func ParseSessionFile(path string) (*SessionSummary, error) {
-	f, err := os.Open(path)
+	f, err := openSessionFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("opening session file: %w", err)
 	}
 	defer f.Close()
 
 	summary := &SessionSummary{
-		ID: strings.TrimSuffix(filepath.Base(path), ".jsonl"),
+		ID: sessionIDFromPath(path),
 	}
 
 	scanner := newSessionScanner(f)
@@ -354,7 +355,7 @@ func appendProjectFiles(files sessionFiles, root projectsRoot, entries []os.DirE
 		projPath := filepath.Join(root.dir, projEntry.Name())
 		projName := memory.DecodePath(projEntry.Name())
 
-		matches, err := filepath.Glob(filepath.Join(projPath, "*.jsonl"))
+		matches, err := globSessionFiles(filepath.Join(projPath, "*"))
 		if err != nil {
 			continue
 		}
@@ -364,7 +365,7 @@ func appendProjectFiles(files sessionFiles, root projectsRoot, entries []os.DirE
 			}
 		}
 
-		subagents, err := filepath.Glob(filepath.Join(projPath, "*", "subagents", "*.jsonl"))
+		subagents, err := globSessionFiles(filepath.Join(projPath, "*", "subagents", "*"))
 		if err != nil {
 			continue
 		}
@@ -574,7 +575,7 @@ func DiscoverTodaySessions(claudeDir string) ([]*SessionSummary, error) {
 
 // ParseSessionDetail returns the full message timeline for a session.
 func ParseSessionDetail(path string) ([]SessionMessage, error) {
-	f, err := os.Open(path)
+	f, err := openSessionFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("opening session file: %w", err)
 	}
@@ -678,13 +679,15 @@ func FindSessionFile(claudeDir, sessionID string) string {
 			if !e.IsDir() {
 				continue
 			}
-			f, err := singleFile(filepath.Join(root.dir, e.Name(), sessionID+".jsonl"))
-			if err != nil {
-				continue
+			for _, name := range []string{sessionID + ".jsonl", sessionID + ".jsonl.gz"} {
+				f, err := singleFile(filepath.Join(root.dir, e.Name(), name))
+				if err != nil {
+					continue
+				}
+				// An unparsable copy still competes, with a zero summary.
+				s, _ := summaryCache.get(f, parseSummaryByValue)
+				copies = append(copies, sessionCopy{file: f, summary: s})
 			}
-			// An unparsable copy still competes, with a zero summary.
-			s, _ := summaryCache.get(f, parseSummaryByValue)
-			copies = append(copies, sessionCopy{file: f, summary: s})
 		}
 	}
 	if len(copies) == 0 {

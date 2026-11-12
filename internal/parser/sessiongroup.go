@@ -18,9 +18,10 @@ type sessionCopy struct {
 	summary SessionSummary
 }
 
-// sessionIDFromPath returns the session ID encoded in a session file name.
+// sessionIDFromPath returns the session ID encoded in a session file name,
+// compressed (.jsonl.gz) or not.
 func sessionIDFromPath(path string) string {
-	return strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	return strings.TrimSuffix(strings.TrimSuffix(filepath.Base(path), ".gz"), ".jsonl")
 }
 
 // primaryCopy returns the index of the most complete copy: latest activity

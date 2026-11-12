@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // MachineStorage is the disk space used by one machine's directory under the
@@ -14,6 +15,11 @@ type MachineStorage struct {
 	Machine string `json:"machine"` // display name, after aliases
 	Bytes   int64  `json:"bytes"`
 	Files   int    `json:"files"`
+
+	// When the machine's agent last contacted the server and last sent new
+	// session data; filled by the server from its records, nil when unknown.
+	LastSeen *time.Time `json:"last_seen,omitempty"`
+	LastData *time.Time `json:"last_data,omitempty"`
 }
 
 // DiscoverMachineStorage returns the disk space used under each machine

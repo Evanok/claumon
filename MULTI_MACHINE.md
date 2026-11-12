@@ -46,7 +46,8 @@ rsync -a ~/.claude/projects/ server:claumon-machines/office-laptop/projects/
 ## Pushing sessions with `claumon agent`
 
 `claumon agent` runs on each machine where Claude Code runs and pushes its
-session files to the claumon server over HTTP(S). Every 30 seconds it sends
+session files to the claumon server over HTTP(S). Every 30 minutes (the
+agent's `interval_seconds`, or `--interval`) it sends
 the complete lines appended to each session and subagent transcript since
 the previous sync; the server appends them under
 `<machines_dir>/<machine>/projects/...`.
@@ -199,10 +200,13 @@ stays in the list until its days expire.
 ## Disk space
 
 The session files collected under `machines_dir` are claumon's long-term
-archive: claumon never deletes them. The dashboard shows the disk space used
-by each machine directory (every file in it, including those claumon does not
-read) in a Stored Transcripts panel, also available as `GET /api/storage`,
-and the total is logged at startup. Set `max_storage_mb` to get a warning
+archive: claumon never deletes them. The dashboard's Machines panel shows,
+for each machine, when its agent last sent new session data and last
+contacted the server (agents ask about the usage gauges every 30 seconds
+while they run, so this tells whether a machine's agent is up), and the disk
+space used by its directory (every file in it, including those claumon does
+not read). The same is available as `GET /api/storage`, and the total size
+is logged at startup. Set `max_storage_mb` to get a warning
 banner when the total goes above it:
 
 ```json

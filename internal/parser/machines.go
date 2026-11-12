@@ -57,6 +57,13 @@ func LocalMachineName() string {
 	return naming.displayName(naming.local)
 }
 
+// MachineDisplayName returns the name shown for a machine name sent by an
+// agent or used as a machines directory name: its alias, or itself.
+func MachineDisplayName(name string) string {
+	naming, _ := machineNames.Load().(machineNaming)
+	return naming.displayName(name)
+}
+
 // displayName returns the alias of name, or name when it has none.
 func (n machineNaming) displayName(name string) string {
 	if alias := n.aliases[name]; alias != "" {

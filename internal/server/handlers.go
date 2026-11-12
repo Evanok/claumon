@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -259,6 +260,12 @@ func (h *Handlers) StorageReport() (StorageUsage, error) {
 	if err != nil {
 		return StorageUsage{}, err
 	}
+	if machines != nil {
+		machines, err = h.withMachineStatus(machines)
+		if err != nil {
+			return StorageUsage{}, err
+		}
+	}
 	report := StorageUsage{Machines: machines, MaxBytes: int64(h.MaxStorageMB) * 1024 * 1024}
 	if report.Machines == nil {
 		report.Machines = []parser.MachineStorage{}
@@ -268,6 +275,39 @@ func (h *Handlers) StorageReport() (StorageUsage, error) {
 	}
 	report.OverLimit = report.MaxBytes > 0 && report.TotalBytes > report.MaxBytes
 	return report, nil
+}
+
+// withMachineStatus adds to the storage rows when each machine's agent was
+// last seen and last sent data, merging agents' names through aliases, and
+// adds a row for a machine known only from its agent's contacts.
+func (h *Handlers) withMachineStatus(machines []parser.MachineStorage) ([]parser.MachineStorage, error) {
+	statuses, err := h.store.MachineStatuses()
+	if err != nil {
+		return nil, err
+	}
+	index := make(map[string]int, len(machines))
+	for i, m := range machines {
+		index[m.Machine] = i
+	}
+	later := func(cur *time.Time, t time.Time) *time.Time {
+		if t.IsZero() || (cur != nil && !t.After(*cur)) {
+			return cur
+		}
+		return &t
+	}
+	for name, st := range statuses {
+		display := parser.MachineDisplayName(name)
+		i, ok := index[display]
+		if !ok {
+			machines = append(machines, parser.MachineStorage{Machine: display})
+			i = len(machines) - 1
+			index[display] = i
+		}
+		machines[i].LastSeen = later(machines[i].LastSeen, st.LastSeen)
+		machines[i].LastData = later(machines[i].LastData, st.LastData)
+	}
+	sort.Slice(machines, func(i, j int) bool { return machines[i].Machine < machines[j].Machine })
+	return machines, nil
 }
 
 // HandleStorage reports the disk space used per machine (multi-machine

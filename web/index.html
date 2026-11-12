@@ -1065,7 +1065,7 @@ tr.clickable { cursor: pointer; }
     </div>
 
     <div class="chart-card" id="storage-card" style="margin-bottom:24px;display:none">
-      <h3 style="display:flex;align-items:center;gap:12px">Stored Transcripts
+      <h3 style="display:flex;align-items:center;gap:12px">Machines
         <span id="storage-total" style="margin-left:auto;font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-dim)"></span>
       </h3>
       <div id="storage-list"></div>
@@ -1752,9 +1752,10 @@ function fetchToday() {
   }).catch(() => {});
 }
 
-// --- Storage (multi-machine mode) ---
-// Disk space used per machine under machines_dir, against max_storage_mb.
-// Only shown when there are machines; nothing is ever deleted.
+// --- Machines panel (multi-machine mode) ---
+// Per machine: when its agent last sent session data and last contacted the
+// server, and the disk space its files use under machines_dir, against
+// max_storage_mb. Only shown when there are machines; nothing is deleted.
 function fmtBytes(n) {
   if (n >= 1024 ** 3) return (n / 1024 ** 3).toFixed(1) + ' GB';
   if (n >= 1024 ** 2) return (n / 1024 ** 2).toFixed(1) + ' MB';
@@ -1785,6 +1786,8 @@ function renderStorage(u) {
   } else document.getElementById('storage-list').innerHTML = shown.map(m => `
     <div style="display:flex;align-items:center;gap:12px;margin:6px 0;font-size:12px">
       <span class="mono" style="width:180px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(m.machine)}">${escHtml(m.machine)}</span>
+      <span style="width:150px;flex-shrink:0;color:var(--text-dim)" title="${m.last_data ? 'New session data received ' + escHtml(new Date(m.last_data).toLocaleString()) : 'No session data received from its agent yet'}">data: ${m.last_data ? fmtTimeAgo(m.last_data) : '—'}</span>
+      <span style="width:150px;flex-shrink:0;color:var(--text-dim)" title="${m.last_seen ? 'Agent last contacted the server ' + escHtml(new Date(m.last_seen).toLocaleString()) : 'Its agent never contacted this server'}">agent: ${m.last_seen ? fmtTimeAgo(m.last_seen) : '—'}</span>
       <div style="flex:1;height:8px;background:var(--bg-hover);border-radius:4px;overflow:hidden">
         <div style="width:${(m.bytes / scale * 100).toFixed(1)}%;height:100%;background:var(--teal)"></div>
       </div>

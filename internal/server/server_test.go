@@ -482,6 +482,46 @@ func TestIngestRoute(t *testing.T) {
 	}
 }
 
+func TestStorageMachineStatus(t *testing.T) {
+	srv, st := setupTestServer(t)
+	machines := filepath.Join(t.TempDir(), "machines")
+	dir := filepath.Join(machines, "office-host", "projects", "-p")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "s.jsonl"), make([]byte, 100), 0o644)
+	parser.SetMachinesDir(machines)
+	parser.SetMachineNames("server", map[string]string{"office-host": "office", "wsl-home": "home"})
+	t.Cleanup(func() {
+		parser.SetMachinesDir("")
+		parser.SetMachineNames("", nil)
+	})
+
+	t0 := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
+	st.TouchMachine("office-host", t0, true)
+	st.TouchMachine("office-host", t0.Add(time.Hour), false)
+	st.TouchMachine("wsl-home", t0.Add(2*time.Hour), false) // agent seen, no files yet
+
+	w := httptest.NewRecorder()
+	srv.Mux.ServeHTTP(w, httptest.NewRequest("GET", "/api/storage", nil))
+	var u StorageUsage
+	if err := json.NewDecoder(w.Body).Decode(&u); err != nil {
+		t.Fatal(err)
+	}
+	if len(u.Machines) != 2 {
+		t.Fatalf("machines = %+v, want home and office", u.Machines)
+	}
+	home, office := u.Machines[0], u.Machines[1]
+	if home.Machine != "home" || home.Bytes != 0 || home.LastSeen == nil || !home.LastSeen.Equal(t0.Add(2*time.Hour)) || home.LastData != nil {
+		t.Errorf("home = %+v", home)
+	}
+	if office.Machine != "office" || office.Bytes != 100 || office.LastSeen == nil || !office.LastSeen.Equal(t0.Add(time.Hour)) ||
+		office.LastData == nil || !office.LastData.Equal(t0) {
+		t.Errorf("office = %+v", office)
+	}
+	if u.TotalBytes != 100 {
+		t.Errorf("total = %d, want 100", u.TotalBytes)
+	}
+}
+
 func TestHandleMemories(t *testing.T) {
 	srv, _ := setupTestServer(t)
 

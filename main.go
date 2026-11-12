@@ -222,10 +222,10 @@ func main() {
 	if cfg.MachinesDir != "" {
 		if report, err := srv.Handlers.StorageReport(); err != nil {
 			log.Printf("[storage] Failed to measure %s: %v", cfg.MachinesDir, err)
-		} else if report.OverLimit {
-			log.Printf("[storage] machines_dir uses %d MB, above max_storage_mb (%d MB)", report.TotalBytes/(1024*1024), cfg.MaxStorageMB)
+		} else if mb := float64(report.TotalBytes) / (1024 * 1024); report.OverLimit {
+			log.Printf("[storage] machines_dir uses %.1f MB, above max_storage_mb (%d MB)", mb, cfg.MaxStorageMB)
 		} else {
-			log.Printf("[storage] machines_dir uses %d MB", report.TotalBytes/(1024*1024))
+			log.Printf("[storage] machines_dir uses %.1f MB", mb)
 		}
 	}
 

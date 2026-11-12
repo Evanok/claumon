@@ -115,6 +115,24 @@ is stored under the name shown at the time: renaming a machine with
 `machine_aliases` starts a new history under the new name, and the old name
 stays in the list until its days expire.
 
+## Disk space
+
+The session files collected under `machines_dir` are claumon's long-term
+archive: claumon never deletes them. The dashboard shows the disk space used
+by each machine directory (every file in it, including those claumon does not
+read) in a Stored Transcripts panel, also available as `GET /api/storage`,
+and the total is logged at startup. Set `max_storage_mb` to get a warning
+banner when the total goes above it:
+
+```json
+{
+  "machines_dir": "~/claumon-machines",
+  "max_storage_mb": 4096
+}
+```
+
+The limit only warns; freeing space is up to you.
+
 ## Limitations
 
 - Usage gauges (rate limits) come from the credentials of the machine claumon

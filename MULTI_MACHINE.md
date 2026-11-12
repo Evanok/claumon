@@ -228,11 +228,12 @@ original files on the server, rsync would copy them again in full.
 The usage gauges (5-hour session, weekly limits) come from Anthropic's usage
 API, which needs the Claude credentials that Claude Code keeps fresh on the
 machines where it runs. A server that does not run Claude Code has none, so
-its agents fetch the gauges for it: every minute each agent asks the server
-whether a reading is due, and the server says yes to one agent at a time
-when its last reading is older than `usage_refresh_minutes` (default 60)
-while a dashboard is open, or older than `usage_idle_refresh_hours` (default
-6) otherwise. An agent whose machine has no valid credentials (Claude Code
+its agents fetch the gauges for it: every 30 seconds each agent asks the
+server whether a reading is due, and the server says yes to one agent at a
+time when a dashboard was opened since the last reading (unless that reading
+is under 2 minutes old), when its last reading is older than
+`usage_refresh_minutes` (default 60) while a dashboard is open, or older than
+`usage_idle_refresh_hours` (default 6) otherwise. An agent whose machine has no valid credentials (Claude Code
 not used there for a while) passes, and another one answers. Readings are
 stored and forecast like the server's own, and the server reports the
 subscription of the agent's credentials. `claumon agent --no-usage` opts a

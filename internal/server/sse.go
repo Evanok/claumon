@@ -17,6 +17,7 @@ type SSEEvent struct {
 
 type SSEBroker struct {
 	mu         sync.RWMutex
+	connects   int // connections since start, never decreasing
 	clients    map[chan SSEEvent]bool
 	broadcast  chan SSEEvent
 	register   chan chan SSEEvent
@@ -30,6 +31,14 @@ func NewBroker() *SSEBroker {
 		register:   make(chan chan SSEEvent),
 		unregister: make(chan chan SSEEvent),
 	}
+}
+
+// Connects returns how many SSE connections were opened since start; it
+// increases each time a dashboard is opened or reloaded.
+func (b *SSEBroker) Connects() int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.connects
 }
 
 // Clients returns the number of connected SSE clients: open dashboard tabs
@@ -58,6 +67,7 @@ func (b *SSEBroker) Run(ctx context.Context) {
 		case ch := <-b.register:
 			b.mu.Lock()
 			b.clients[ch] = true
+			b.connects++
 			b.mu.Unlock()
 			log.Printf("[sse] client connected (%d total)", len(b.clients))
 

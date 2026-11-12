@@ -127,6 +127,9 @@ func TestBrokerClients(t *testing.T) {
 	if n := broker.Clients(); n != 1 {
 		t.Errorf("clients = %d, want 1", n)
 	}
+	if n := broker.Connects(); n != 1 {
+		t.Errorf("connects = %d, want 1", n)
+	}
 	broker.unregister <- ch
 	broker.Send(SSEEvent{Event: "sync"})
 	time.Sleep(10 * time.Millisecond)

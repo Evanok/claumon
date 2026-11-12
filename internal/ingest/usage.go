@@ -19,6 +19,7 @@ import (
 // wanted; any agent with valid credentials provides it.
 //
 //	GET  /api/ingest?kind=usage   -> {"due": bool}: should this agent fetch now?
+//	                                 (claumon agent asks every 30 seconds)
 //	POST /api/ingest?kind=usage   body: the usage API response, as is
 //	     X-Claumon-Machine, X-Claumon-Fetched-At (unix nanoseconds),
 //	     X-Claumon-Subscription, X-Claumon-Rate-Limit-Tier

@@ -31,29 +31,63 @@ func newTestHub(t *testing.T) (*usageHub, *server.Server, *store.Store) {
 
 func TestUsageHubDue(t *testing.T) {
 	hub, _, _ := newTestHub(t)
-	viewers := 0
+	viewers, connects := 0, 0
 	hub.viewers = func() int { return viewers }
+	hub.connects = func() int { return connects }
 	t0 := time.Now()
 	hub.last = t0
 
 	steps := []struct {
-		name    string
-		at      time.Duration // after the last reading
-		viewers int
-		want    bool
+		name     string
+		at       time.Duration // after the last reading
+		viewers  int
+		connects int // dashboards opened since start
+		want     bool
 	}{
-		{"fresh reading, dashboard open", 30 * time.Minute, 1, false},
-		{"an hour old, nobody watching", 61 * time.Minute, 0, false},
-		{"an hour old, dashboard open", 61 * time.Minute, 1, true},
-		{"another agent asks right after", 62 * time.Minute, 1, false},
-		{"the first agent never answered", 64 * time.Minute, 1, true},
-		{"six hours old, nobody watching", 6*time.Hour + time.Minute, 0, true},
+		{"fresh reading, dashboard open", 30 * time.Minute, 1, 0, false},
+		{"an hour old, nobody watching", 61 * time.Minute, 0, 0, false},
+		{"an hour old, dashboard open", 61 * time.Minute, 1, 0, true},
+		{"another agent asks right after", 62 * time.Minute, 1, 0, false},
+		{"the first agent never answered", 64 * time.Minute, 1, 0, true},
+		{"six hours old, nobody watching", 6*time.Hour + time.Minute, 0, 0, true},
 	}
 	for _, st := range steps {
-		viewers = st.viewers
+		viewers, connects = st.viewers, st.connects
 		if got := hub.UsageDue(t0.Add(st.at)); got != st.want {
 			t.Errorf("%s: due = %v, want %v", st.name, got, st.want)
 		}
+	}
+}
+
+func TestUsageHubDueOnOpen(t *testing.T) {
+	hub, _, _ := newTestHub(t)
+	connects := 3
+	hub.viewers = func() int { return 1 }
+	hub.connects = func() int { return connects }
+	hub.seenConnects = 3
+	t0 := time.Now()
+	hub.last = t0
+
+	// Nobody opened the dashboard since the last reading.
+	if hub.UsageDue(t0.Add(10 * time.Minute)) {
+		t.Error("due without a new dashboard")
+	}
+	// A dashboard opens one minute after a reading: too fresh to refetch.
+	connects = 4
+	if hub.UsageDue(t0.Add(time.Minute)) {
+		t.Error("due right after a reading")
+	}
+	// Ten minutes after the reading, the opening asks for a new one.
+	if !hub.UsageDue(t0.Add(10 * time.Minute)) {
+		t.Error("not due after a dashboard opened")
+	}
+	// The reading arrives: the opening is served.
+	body := []byte(`{"five_hour": {"utilization": 1}, "seven_day": {"utilization": 1}}`)
+	if ok, err := hub.AcceptUsage(ingest.PushedUsage{Machine: "m", Body: body, FetchedAt: t0.Add(11 * time.Minute)}); !ok || err != nil {
+		t.Fatalf("accept: %v, %v", ok, err)
+	}
+	if hub.UsageDue(t0.Add(20 * time.Minute)) {
+		t.Error("due again without a new dashboard")
 	}
 }
 

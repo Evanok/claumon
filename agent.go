@@ -155,7 +155,7 @@ func runAgent() {
 		return
 	}
 	if !o.noUsage {
-		go a.RunUsage(ctx, usageFetcher(cfg, o.claudeDir), time.Minute, log.Printf)
+		go a.RunUsage(ctx, usageFetcher(cfg, o.claudeDir), 30*time.Second, log.Printf)
 	}
 	a.Run(ctx, o.interval, log.Printf)
 }

@@ -85,6 +85,20 @@ This file is fork-only: leave it out of upstream pull requests.
   seen on a screenshot of a $0.60 day.
 - **Fix:** `a9fddd2`.
 
+### 13. Session project names decoded wrongly from directory names
+
+- **Symptom:** the session list and detail show the project decoded from the
+  project directory name, where Claude Code replaced `/`, `\`, `_` and `-`
+  by `-`. Decoding is lossy: `revive_boring_campaign` shows as
+  `revive/boring/campaign`, `arezzo-game` as `arezzo/game`, and
+  `memory.DecodePath` adds a leading `//` (see 9). The real working directory
+  is in each session's `cwd`.
+- **Evidence:** real Windows session: project
+  `C:/Users/User/work/mode/warhammer3/WH3/Dump/Fork/revive/boring/campaign`,
+  cwd `C:\Users\User\work\mode_warhammer3\WH3-Dump-Fork\revive_boring_campaign`.
+- **Fix:** see the commit "UI: show session projects from their working
+  directory".
+
 ## Found, not fixed
 
 ### 8. The Recent list shows fewer sessions than its limit

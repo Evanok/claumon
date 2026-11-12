@@ -246,6 +246,7 @@ Remove-Item -Recurse "$env:USERPROFILE\.claumon"
 
 - Per-session input / output / cache token breakdowns with **estimated API-equivalent cost**
 - **Daily aggregates** with trend charts over a selectable window (7 to 90 days, up to a year or the whole history when `retention_days` keeps more) and a 24-hour activity heatmap
+- **Plan limits chart**: the weekly and 5-hour session utilization of your plan over the same window, with each window's peak (the usage API only gives percentages, not the limits' size)
 
 ### Sessions & processes
 

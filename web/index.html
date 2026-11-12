@@ -1059,6 +1059,14 @@ tr.clickable { cursor: pointer; }
     </div>
 
     <div class="chart-card" style="margin-bottom:24px">
+      <h3 style="display:flex;align-items:center;gap:12px">Plan Limits <span class="history-range-label">(14 days)</span>
+        <span style="font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-dim)" title="The usage limits of the Claude account, shared by all machines: the machine filter does not apply">account-wide</span>
+        <span id="limits-summary" style="margin-left:auto;font-size:11px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-dim)"></span>
+      </h3>
+      <div id="chart-limits"></div>
+    </div>
+
+    <div class="chart-card" style="margin-bottom:24px">
       <h3>Today's Activity by Hour</h3>
       <div class="heatmap" id="heatmap"></div>
       <div class="heatmap-labels" id="heatmap-labels"></div>
@@ -1680,7 +1688,90 @@ document.getElementById('history-range').addEventListener('change', e => {
   historyWanted = v;
   try { localStorage.setItem('claumon.historyDays', String(v)); } catch (e2) {}
   fetchHistory(false);
+  fetchLimits();
 });
+
+// --- Plan limits ---
+// The usage API only gives the utilization of the plan's limits, in
+// percent, not their size: this chart shows the stored readings of the
+// weekly and 5-hour session limits over the history window, with the peak
+// each window reached. Account-wide: not filtered by machine.
+function fetchLimits() {
+  fetch(`/api/limits?days=${historyFetchDays()}`).then(r => r.json()).then(renderLimits).catch(() => {});
+}
+
+function renderLimits(rep) {
+  const container = document.getElementById('chart-limits');
+  const summary = document.getElementById('limits-summary');
+  const readings = (rep && rep.readings) || [];
+  if (!readings.length) {
+    container.innerHTML = '<div class="empty-state">No readings yet: one is recorded each time the usage gauges refresh</div>';
+    summary.textContent = '';
+    return;
+  }
+  const pts = readings.map(r => ({ t: new Date(r.t).getTime(), session: r.session, weekly: r.weekly }));
+  const now = Date.now();
+  const start = historyRange === 'all' ? Math.min(pts[0].t, now - 86400000) : now - historyFetchDays() * 86400000;
+  // A full-width card: twice the viewBox width of the half-width charts, so
+  // text renders at the same size.
+  const w = 1200, h = 220, pad = 34;
+  const yMax = Math.max(100, ...pts.map(p => Math.max(p.session, p.weekly)));
+  const x = t => pad + (t - start) / (now - start) * (w - pad - 10);
+  const y = v => h - pad - v / yMax * (h - pad * 2);
+
+  let svg = `<svg viewBox="0 0 ${w} ${h}" class="bar-chart" preserveAspectRatio="xMidYMid meet">`;
+  [0, 25, 50, 75, 100].forEach(v => {
+    const dashed = v === 100;
+    svg += `<line x1="${pad}" y1="${y(v)}" x2="${w - 10}" y2="${y(v)}" stroke="${dashed ? 'var(--red)' : 'var(--border)'}" stroke-width="${dashed ? 1 : 0.5}"${dashed ? ' stroke-dasharray="4 3"' : ''}/>`;
+    svg += `<text x="${pad - 4}" y="${y(v) + 3}" class="bar-value" text-anchor="end">${v}%</text>`;
+  });
+  const ticks = 6;
+  for (let i = 0; i <= ticks; i++) {
+    const t = start + (now - start) * i / ticks;
+    const d = new Date(t);
+    const label = (now - start) <= 2 * 86400000
+      ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const anchor = i === 0 ? 'start' : i === ticks ? 'end' : 'middle';
+    svg += `<text x="${x(t)}" y="${h - 8}" class="bar-label" text-anchor="${anchor}">${label}</text>`;
+  }
+  const series = [
+    { key: 'weekly', name: 'Weekly', color: 'var(--accent)', width: 2 },
+    { key: 'session', name: 'Session (5h)', color: 'var(--teal)', width: 1.2 },
+  ];
+  series.forEach(sr => {
+    const line = pts.map(p => `${x(p.t).toFixed(1)},${y(p[sr.key]).toFixed(1)}`).join(' ');
+    svg += `<polyline points="${line}" fill="none" stroke="${sr.color}" stroke-width="${sr.width}" opacity="0.9"/>`;
+    // Dots (with a tooltip each) only while they stay readable.
+    if (pts.length <= 80) {
+      pts.forEach(p => {
+        svg += `<circle cx="${x(p.t).toFixed(1)}" cy="${y(p[sr.key]).toFixed(1)}" r="2" fill="${sr.color}"><title>${sr.name}: ${p[sr.key]}% at ${new Date(p.t).toLocaleString()}</title></circle>`;
+      });
+    }
+  });
+  let lx = pad;
+  series.forEach(sr => {
+    svg += `<rect x="${lx}" y="6" width="8" height="8" rx="1" fill="${sr.color}"/>`;
+    svg += `<text x="${lx + 12}" y="14" class="bar-label">${sr.name}</text>`;
+    lx += sr.name.length * 6 + 28;
+  });
+  svg += '</svg>';
+  container.innerHTML = svg;
+
+  const weeks = rep.weekly_windows || [];
+  const sessions = rep.session_windows || [];
+  const parts = [];
+  if (weeks.length) {
+    const cur = weeks[weeks.length - 1];
+    parts.push(`This week: peak <b style="color:var(--text-bright);font-weight:600">${cur.peak}%</b>`);
+    if (weeks.length > 1) parts.push(`last week: ${weeks[weeks.length - 2].peak}%`);
+  }
+  if (sessions.length) {
+    const top = sessions.reduce((a, b) => (b.peak > a.peak ? b : a));
+    parts.push(`busiest 5h session: ${top.peak}% (${new Date(top.peak_at).toLocaleDateString()})`);
+  }
+  summary.innerHTML = parts.join(' &middot; ');
+}
 
 // --- Machine filter (multi-machine mode) ---
 // One filter in the top bar narrows the whole dashboard to one machine:
@@ -3170,6 +3261,7 @@ function fetchAll() {
   fetchProcesses();
 
   fetchHistory(false);
+  fetchLimits();
   fetchStorage();
 
   fetch('/api/usage').then(r => r.json()).then(updateUsageGauges).catch(() => {});
@@ -3230,6 +3322,7 @@ function connectSSE() {
   es.addEventListener('usage', e => {
     const data = JSON.parse(e.data);
     updateUsageGauges(data);
+    fetchLimits(); // a new reading
     document.getElementById('lastUpdated').textContent = 'Updated: ' + new Date().toLocaleTimeString();
   });
 
@@ -3342,6 +3435,7 @@ setInterval(() => {
   }).catch(() => {});
   // Refresh history charts too (new daily aggregates from backfill)
   fetchHistory(true);
+  fetchLimits();
   fetchStorage();
 }, 60000);
 

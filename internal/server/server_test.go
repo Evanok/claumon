@@ -522,6 +522,45 @@ func TestStorageMachineStatus(t *testing.T) {
 	}
 }
 
+func TestHandleLimits(t *testing.T) {
+	srv, st := setupTestServer(t)
+	get := func(url string) limitsReport {
+		t.Helper()
+		w := httptest.NewRecorder()
+		srv.Mux.ServeHTTP(w, httptest.NewRequest("GET", url, nil))
+		var rep limitsReport
+		if err := json.NewDecoder(w.Body).Decode(&rep); err != nil {
+			t.Fatal(err)
+		}
+		return rep
+	}
+	if rep := get("/api/limits"); rep.Readings == nil || len(rep.Readings) != 0 || rep.WeeklyWindows == nil {
+		t.Fatalf("empty store: %+v, want empty lists", rep)
+	}
+
+	// Two session windows within one week.
+	for _, r := range []struct {
+		session, weekly float64
+		sReset, wReset  string
+	}{
+		{10, 20, "s1", "w1"}, {40, 30, "s1", "w1"}, {5, 31, "s2", "w1"}, {25, 38, "s2", "w1"},
+	} {
+		if err := st.SaveUsageSnapshot(r.session, r.weekly, r.sReset, r.wReset, json.RawMessage(`{}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rep := get("/api/limits?days=7")
+	if len(rep.Readings) != 4 || rep.Readings[1].Session != 40 {
+		t.Fatalf("readings = %+v", rep.Readings)
+	}
+	if len(rep.WeeklyWindows) != 1 || rep.WeeklyWindows[0].Peak != 38 {
+		t.Errorf("weekly windows = %+v, want one peaking at 38", rep.WeeklyWindows)
+	}
+	if len(rep.SessionWindows) != 2 || rep.SessionWindows[0].Peak != 40 || rep.SessionWindows[1].Peak != 25 {
+		t.Errorf("session windows = %+v, want peaks 40 and 25", rep.SessionWindows)
+	}
+}
+
 func TestHandleMemories(t *testing.T) {
 	srv, _ := setupTestServer(t)
 

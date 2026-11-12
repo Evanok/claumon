@@ -223,10 +223,30 @@ resumes, the server restores the file before appending the new lines. Leave
 the option off when the files are copied with `rsync`: no longer finding the
 original files on the server, rsync would copy them again in full.
 
+## Usage gauges
+
+The usage gauges (5-hour session, weekly limits) come from Anthropic's usage
+API, which needs the Claude credentials that Claude Code keeps fresh on the
+machines where it runs. A server that does not run Claude Code has none, so
+its agents fetch the gauges for it: every minute each agent asks the server
+whether a reading is due, and the server says yes to one agent at a time
+when its last reading is older than `usage_refresh_minutes` (default 60)
+while a dashboard is open, or older than `usage_idle_refresh_hours` (default
+6) otherwise. An agent whose machine has no valid credentials (Claude Code
+not used there for a while) passes, and another one answers. Readings are
+stored and forecast like the server's own, and the server reports the
+subscription of the agent's credentials. `claumon agent --no-usage` opts a
+machine out.
+
+```json
+{
+  "usage_refresh_minutes": 60,
+  "usage_idle_refresh_hours": 6
+}
+```
+
 ## Limitations
 
-- Usage gauges (rate limits) come from the credentials of the machine claumon
-  runs on, not from the other machines.
 - Running and stuck states, and the actions that interrupt a session, only
   apply to processes on the machine claumon runs on.
 - Memory files are only read from the local `~/.claude`.

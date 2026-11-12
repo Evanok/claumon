@@ -34,6 +34,14 @@ type Handlers struct {
 	// retention, so the whole kept history can be shown. Values below
 	// minHistoryMaxDays are raised to it.
 	HistoryMaxDays int
+	// RemoteUsageTTL is how long usage readings pushed by agents count as
+	// valid authentication (multi-machine mode, see SetRemoteUsage).
+	RemoteUsageTTL time.Duration
+	remoteMu       sync.RWMutex
+	remoteUsageAt  time.Time
+	remoteSub      string
+	remoteTier     string
+
 	// MaxStorageMB is the disk space the machines directory may use before
 	// the dashboard warns (multi-machine mode); 0 means no limit.
 	MaxStorageMB int
@@ -458,16 +466,56 @@ func (h *Handlers) HandleSessionDetail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, messages)
 }
 
+// SetRemoteUsage records that an agent pushed a usage reading at, with the
+// subscription of its credentials. A server without credentials of its own
+// then reports authentication as working, and that subscription.
+func (h *Handlers) SetRemoteUsage(at time.Time, subscription, tier string) {
+	h.remoteMu.Lock()
+	defer h.remoteMu.Unlock()
+	h.remoteUsageAt = at
+	if subscription != "" {
+		h.remoteSub = subscription
+	}
+	if tier != "" {
+		h.remoteTier = tier
+	}
+}
+
+// remoteUsage returns the subscription reported with pushed readings and
+// whether a reading arrived within RemoteUsageTTL.
+func (h *Handlers) remoteUsage() (subscription, tier string, fresh bool) {
+	h.remoteMu.RLock()
+	defer h.remoteMu.RUnlock()
+	fresh = !h.remoteUsageAt.IsZero() && time.Since(h.remoteUsageAt) < h.RemoteUsageTTL
+	return h.remoteSub, h.remoteTier, fresh
+}
+
+// authStatus is the provider's status, or OK while agents push readings.
+func (h *Handlers) authStatus() (status, message string, known bool) {
+	if _, _, fresh := h.remoteUsage(); fresh {
+		return auth.AuthOK, "", true
+	}
+	if h.AuthProvider == nil {
+		return "", "", false
+	}
+	status, message = h.AuthProvider.Status()
+	return status, message, true
+}
+
 func (h *Handlers) HandleInfo(w http.ResponseWriter, r *http.Request) {
-	isAPI := h.SubscriptionType == "" || h.SubscriptionType == "api"
+	sub, tier := h.SubscriptionType, h.RateLimitTier
+	if rsub, rtier, _ := h.remoteUsage(); sub == "" && rsub != "" {
+		sub, tier = rsub, rtier
+	}
+	isAPI := sub == "" || sub == "api"
 	h.updateMu.RLock()
 	latest := h.latestVersion
 	available := h.updateAvailable
 	h.updateMu.RUnlock()
 	info := map[string]interface{}{
 		"version":           h.Version,
-		"subscription_type": h.SubscriptionType,
-		"rate_limit_tier":   h.RateLimitTier,
+		"subscription_type": sub,
+		"rate_limit_tier":   tier,
 		"is_api_billing":    isAPI,
 		"update_available":  available,
 		"latest_version":    latest,
@@ -475,8 +523,7 @@ func (h *Handlers) HandleInfo(w http.ResponseWriter, r *http.Request) {
 		"history_max_days":  h.historyMaxDays(),
 		"local_machine":     parser.LocalMachineName(),
 	}
-	if h.AuthProvider != nil {
-		status, msg := h.AuthProvider.Status()
+	if status, msg, known := h.authStatus(); known {
 		info["auth_status"] = status
 		info["auth_message"] = msg
 	}
@@ -605,11 +652,10 @@ func applyCachedHeadline(s forecast.SamplePayload, p forecast.Payload) forecast.
 }
 
 func (h *Handlers) HandleAuthStatus(w http.ResponseWriter, r *http.Request) {
-	if h.AuthProvider == nil {
-		writeJSON(w, map[string]string{"status": auth.AuthOK, "message": ""})
-		return
+	status, msg, known := h.authStatus()
+	if !known {
+		status, msg = auth.AuthOK, ""
 	}
-	status, msg := h.AuthProvider.Status()
 	writeJSON(w, map[string]string{"status": status, "message": msg})
 }
 

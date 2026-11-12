@@ -64,6 +64,11 @@ type Config struct {
 	// Compress the files received from agents once their session has been
 	// inactive for this many days (0: never). Requires ingest_tokens.
 	CompressAfterDays int `json:"compress_after_days,omitempty"`
+	// How often agents refresh the usage gauges for the server: every
+	// usage_refresh_minutes while a dashboard is open (default 60), every
+	// usage_idle_refresh_hours otherwise (default 6). Requires ingest_tokens.
+	UsageRefreshMinutes   int `json:"usage_refresh_minutes,omitempty"`
+	UsageIdleRefreshHours int `json:"usage_idle_refresh_hours,omitempty"`
 	// Settings of `claumon agent` on the machines that push their sessions.
 	Agent AgentConfig `json:"agent,omitempty"`
 }
@@ -261,6 +266,19 @@ func main() {
 	// re-attach the forecast instead of waiting a full interval.
 	fcSvc := forecast.NewService(&storeAdapter{st: st}, forecast.DefaultConfig())
 	srv.Handlers.Forecast = fcSvc
+	if receiver != nil {
+		openEvery := time.Duration(cfg.UsageRefreshMinutes) * time.Minute
+		if openEvery <= 0 {
+			openEvery = time.Hour
+		}
+		idleEvery := time.Duration(cfg.UsageIdleRefreshHours) * time.Hour
+		if idleEvery <= 0 {
+			idleEvery = 6 * time.Hour
+		}
+		srv.Handlers.RemoteUsageTTL = idleEvery + time.Hour
+		receiver.SetUsageSink(newUsageHub(st, srv.Broker, srv.Handlers, fcSvc, openEvery, idleEvery))
+		log.Printf("[usage] Agents refresh the usage every %s while a dashboard is open, every %s otherwise", openEvery, idleEvery)
+	}
 	fcReady := make(chan struct{})
 	go func() {
 		fcSvc.RefitAll(time.Now())

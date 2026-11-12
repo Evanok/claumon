@@ -20,10 +20,11 @@ type Server struct {
 	routes *http.ServeMux
 }
 
-// HandleIngest serves POST /api/ingest with h, the receiver of session files
-// pushed by agents (multi-machine mode). Without it the route does not exist.
+// HandleIngest serves /api/ingest with h, the receiver of session files and
+// usage readings pushed by agents (multi-machine mode). Without it the route
+// does not exist.
 func (s *Server) HandleIngest(h http.Handler) {
-	s.routes.Handle("POST /api/ingest", h)
+	s.routes.Handle("/api/ingest", h)
 }
 
 // New builds the dashboard server. allowedHosts lists extra hostnames the

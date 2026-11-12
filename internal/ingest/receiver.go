@@ -77,6 +77,7 @@ type Receiver struct {
 	dir    string // the machines directory
 	tokens []string
 	store  OffsetStore
+	usage  UsageSink // nil: usage pushes disabled
 
 	mu sync.Mutex // one chunk at a time: chunks of a file must apply in order
 }
@@ -144,10 +145,19 @@ func (rc *Receiver) authorized(r *http.Request) bool {
 	return false
 }
 
-// ServeHTTP handles POST /api/ingest.
+// ServeHTTP handles /api/ingest: file chunks (POST), and usage readings
+// with ?kind=usage (see usage.go).
 func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !rc.authorized(r) {
 		http.Error(w, "invalid ingest token", http.StatusUnauthorized)
+		return
+	}
+	if r.URL.Query().Get("kind") == "usage" {
+		rc.serveUsage(w, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 

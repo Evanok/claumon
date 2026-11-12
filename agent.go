@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/fabioconcina/claumon/internal/api"
+	"github.com/fabioconcina/claumon/internal/auth"
 	"github.com/fabioconcina/claumon/internal/ingest"
 	"github.com/fabioconcina/claumon/internal/service"
 )
@@ -34,6 +36,7 @@ type agentOptions struct {
 	serverURL, token, machine string
 	interval                  time.Duration
 	once                      bool
+	noUsage                   bool
 	statePath                 string
 	claudeDir                 string
 	logFile                   string
@@ -49,6 +52,7 @@ func parseAgentOptions(cfg Config, args []string, stderr io.Writer) (agentOption
 	machine := fs.String("machine", cfg.Agent.Machine, "machine name (default: hostname, wsl-<hostname> under WSL)")
 	interval := fs.Duration("interval", 0, "time between two syncs (default 30s)")
 	once := fs.Bool("once", false, "sync once and exit")
+	noUsage := fs.Bool("no-usage", false, "do not fetch the usage gauges for the server")
 	statePath := fs.String("state", filepath.Join(filepath.Dir(cfg.DBPath), "agent-state.json"), "file recording what was sent")
 	claudeDir := fs.String("claude-dir", cfg.ClaudeDir, "Claude directory whose projects are pushed")
 	logFile := fs.String("log-file", "", "append logs to this file instead of stderr")
@@ -64,7 +68,7 @@ func parseAgentOptions(cfg Config, args []string, stderr io.Writer) (agentOption
 
 	o := agentOptions{
 		serverURL: *server, token: *token, machine: *machine,
-		interval: *interval, once: *once, statePath: *statePath, claudeDir: expandHome(*claudeDir, homeDir()),
+		interval: *interval, once: *once, noUsage: *noUsage, statePath: *statePath, claudeDir: expandHome(*claudeDir, homeDir()),
 		logFile: expandHome(*logFile, homeDir()),
 	}
 	if o.interval <= 0 && cfg.Agent.IntervalSecs > 0 {
@@ -150,7 +154,37 @@ func runAgent() {
 		}
 		return
 	}
+	if !o.noUsage {
+		go a.RunUsage(ctx, usageFetcher(cfg, o.claudeDir), time.Minute, log.Printf)
+	}
 	a.Run(ctx, o.interval, log.Printf)
+}
+
+// usageFetcher fetches the usage gauges with this machine's Claude
+// credentials, which Claude Code keeps fresh while it is used here.
+func usageFetcher(cfg Config, claudeDir string) ingest.UsageFetcher {
+	provider := auth.NewProvider(claudeDir, cfg.CredentialsPath)
+	client := api.NewClient(provider)
+	return func(ctx context.Context) ([]byte, string, string, error) {
+		if !provider.HasToken() {
+			if provider.Reload() != nil || !provider.HasToken() {
+				return nil, "", "", ingest.ErrNoCredentials
+			}
+		}
+		usage, err := client.FetchUsage(ctx)
+		var authErr *api.AuthError
+		if errors.As(err, &authErr) {
+			return nil, "", "", fmt.Errorf("%w (%s)", ingest.ErrNoCredentials, authErr.Message)
+		}
+		if err != nil {
+			return nil, "", "", err
+		}
+		var sub, tier string
+		if creds := provider.Credentials(); creds != nil {
+			sub, tier = creds.SubscriptionType, creds.RateLimitTier
+		}
+		return usage.Raw, sub, tier, nil
+	}
 }
 
 // homeDir returns the user's home directory, or "" when unknown.

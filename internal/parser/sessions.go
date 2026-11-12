@@ -705,6 +705,20 @@ func DiscoverDailyAggregates(claudeDir string) (map[string]SessionAggregate, err
 	return dailyAggregates(files.all()), nil
 }
 
+// DiscoverMachineDailyAggregates is DiscoverDailyAggregates split by
+// machine, keyed by date then machine name. It returns nil in
+// single-machine mode, where files carry no machine name.
+func DiscoverMachineDailyAggregates(claudeDir string) (map[string]map[string]SessionAggregate, error) {
+	if getMachinesDir() == "" {
+		return nil, nil
+	}
+	files, err := enumerateFiles(claudeDir)
+	if err != nil {
+		return nil, err
+	}
+	return dailyMachineAggregates(files.all()), nil
+}
+
 // SessionAggregate holds aggregated token counts and cost across sessions.
 type SessionAggregate struct {
 	InputTokens       int     `json:"input_tokens"`

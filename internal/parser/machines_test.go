@@ -1,11 +1,13 @@
 package parser
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // minimalSession is a one-exchange session: one user line and one assistant
@@ -256,5 +258,68 @@ func TestFindSessionFileMachines(t *testing.T) {
 				t.Errorf("FindSessionFile(%q) = %q, want %q", tt.id, got, tt.wantPath)
 			}
 		})
+	}
+}
+
+func TestDiscoverMachineDailyAggregates(t *testing.T) {
+	base := t.TempDir()
+	older := time.Date(2026, 3, 20, 13, 0, 0, 0, time.UTC)
+	newer := time.Date(2026, 3, 21, 10, 0, 0, 0, time.UTC)
+	writeLedgerFiles(t, base, []ledgerFile{
+		// s1 ran locally; the office copy repeats it and adds a next-day
+		// exchange. The repeated records count for the local machine (its
+		// copy was modified first), the new ones for office.
+		{"claude/projects/-p/s1.jsonl", []string{ledgerUser1, ledgerResp1}, older},
+		{"machines/office/projects/-p/s1.jsonl", []string{ledgerUser1, ledgerResp1, ledgerUser3, ledgerResp3}, newer},
+		{"machines/office/projects/-p/s2.jsonl", []string{ledgerUser2, ledgerResp2}, newer},
+	})
+	claude := filepath.Join(base, "claude")
+
+	setMachinesDirForTest(t, "")
+	if got, err := DiscoverMachineDailyAggregates(claude); err != nil || got != nil {
+		t.Fatalf("single-machine mode: got %v, %v; want nil, nil", got, err)
+	}
+
+	setMachinesDirForTest(t, filepath.Join(base, "machines"))
+	setMachineNamesForTest(t, "laptop", nil)
+	got, err := DiscoverMachineDailyAggregates(claude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type want struct{ input, messages, sessions int }
+	wants := map[string]map[string]want{
+		day(20): {"laptop": {100, 2, 1}, "office": {20, 2, 1}},
+		day(21): {"office": {3, 2, 1}},
+	}
+	for date, machines := range wants {
+		if len(got[date]) != len(machines) {
+			t.Errorf("%s: machines = %v, want %v", date, got[date], machines)
+		}
+		for m, w := range machines {
+			a := got[date][m]
+			if a.InputTokens != w.input || a.MessageCount != w.messages || a.SessionCount != w.sessions {
+				t.Errorf("%s/%s: input/messages/sessions = %d/%d/%d, want %d/%d/%d",
+					date, m, a.InputTokens, a.MessageCount, a.SessionCount, w.input, w.messages, w.sessions)
+			}
+		}
+	}
+
+	// The machines of a day add up to the day's total.
+	daily, err := DiscoverDailyAggregates(claude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for date, machines := range got {
+		var input, messages int
+		var cost float64
+		for _, a := range machines {
+			input += a.InputTokens
+			messages += a.MessageCount
+			cost += a.CostUSD
+		}
+		if d := daily[date]; d.InputTokens != input || d.MessageCount != messages || math.Abs(d.CostUSD-cost) > 0.0002 {
+			t.Errorf("%s: machines sum input/messages/cost = %d/%d/%v, day total %d/%d/%v",
+				date, input, messages, cost, d.InputTokens, d.MessageCount, d.CostUSD)
+		}
 	}
 }

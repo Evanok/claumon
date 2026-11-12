@@ -136,17 +136,40 @@ func localDate(t time.Time) string {
 // least one counted record on that date; a subagent transcript counts for
 // its parent session.
 func dailyAggregates(files []sessionFile) map[string]SessionAggregate {
+	out := make(map[string]SessionAggregate)
+	for date, groups := range dailyAggregatesBy(files, func(sessionFile) string { return "" }) {
+		out[date] = groups[""]
+	}
+	return out
+}
+
+// dailyMachineAggregates is dailyAggregates split by machine: each record
+// counts for the machine of the file it is attributed to (see
+// visitUniqueRecords), so the machines of a day add up to its total, except
+// SessionCount when a session has records on several machines that day.
+func dailyMachineAggregates(files []sessionFile) map[string]map[string]SessionAggregate {
+	return dailyAggregatesBy(files, func(f sessionFile) string { return f.machine })
+}
+
+// dailyAggregatesBy buckets the deduplicated records of files by local date,
+// then by the group key returns for the file a record is attributed to.
+func dailyAggregatesBy(files []sessionFile, key func(sessionFile) string) map[string]map[string]SessionAggregate {
 	type acc struct {
 		agg      SessionAggregate
 		sessions map[string]bool
 	}
-	perDay := map[string]*acc{}
+	perGroup := map[string]map[string]*acc{}
 	bucket := func(f sessionFile, t time.Time) *SessionAggregate {
-		date := localDate(t)
-		a := perDay[date]
+		date, group := localDate(t), key(f)
+		groups := perGroup[date]
+		if groups == nil {
+			groups = map[string]*acc{}
+			perGroup[date] = groups
+		}
+		a := groups[group]
 		if a == nil {
 			a = &acc{sessions: map[string]bool{}}
-			perDay[date] = a
+			groups[group] = a
 		}
 		a.sessions[f.sessionID()] = true
 		return &a.agg
@@ -166,11 +189,14 @@ func dailyAggregates(files []sessionFile) map[string]SessionAggregate {
 		},
 	})
 
-	out := make(map[string]SessionAggregate, len(perDay))
-	for date, a := range perDay {
-		a.agg.SessionCount = len(a.sessions)
-		a.agg.CostUSD = math.Round(a.agg.CostUSD*10000) / 10000
-		out[date] = a.agg
+	out := make(map[string]map[string]SessionAggregate, len(perGroup))
+	for date, groups := range perGroup {
+		out[date] = make(map[string]SessionAggregate, len(groups))
+		for group, a := range groups {
+			a.agg.SessionCount = len(a.sessions)
+			a.agg.CostUSD = math.Round(a.agg.CostUSD*10000) / 10000
+			out[date][group] = a.agg
+		}
 	}
 	return out
 }

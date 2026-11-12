@@ -74,10 +74,11 @@ type OffsetStore interface {
 
 // Receiver is the server side of the protocol.
 type Receiver struct {
-	dir    string // the machines directory
-	tokens []string
-	store  OffsetStore
-	usage  UsageSink // nil: usage pushes disabled
+	dir     string // the machines directory
+	tokens  []string
+	store   OffsetStore
+	usage   UsageSink      // nil: usage pushes disabled
+	tracker MachineTracker // nil: contacts not recorded
 
 	mu sync.Mutex // one chunk at a time: chunks of a file must apply in order
 }
@@ -227,6 +228,7 @@ func (rc *Receiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "writing ingest state failed", http.StatusInternalServerError)
 		return
 	}
+	rc.seen(machine, len(chunk) > 0)
 	reply(w, http.StatusOK, end)
 }
 

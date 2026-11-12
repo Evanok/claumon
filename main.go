@@ -242,6 +242,7 @@ func main() {
 		log.Printf("[ingest] ingest_tokens is set but machines_dir is not: agent uploads are disabled")
 	case len(cfg.IngestTokens) > 0:
 		receiver = ingest.NewReceiver(cfg.MachinesDir, cfg.IngestTokens, st)
+		receiver.SetMachineTracker(newMachineTracker(st))
 		srv.HandleIngest(receiver)
 		log.Printf("[ingest] Accepting agent uploads into %s (%d tokens)", cfg.MachinesDir, len(cfg.IngestTokens))
 	}

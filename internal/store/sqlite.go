@@ -88,6 +88,9 @@ func migrate(db *sql.DB) error {
 	if err := migrateIngest(db); err != nil {
 		return fmt.Errorf("running ingest migrations: %w", err)
 	}
+	if err := migrateMachineStatus(db); err != nil {
+		return fmt.Errorf("running machine status migrations: %w", err)
+	}
 	if err := canonicalizeResetAts(db); err != nil {
 		return fmt.Errorf("canonicalizing reset_at: %w", err)
 	}

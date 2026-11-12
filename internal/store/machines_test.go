@@ -84,3 +84,37 @@ func TestMachineAggregates(t *testing.T) {
 		t.Errorf("daily_aggregates has %d rows, want 0", n)
 	}
 }
+
+func TestMachineStatus(t *testing.T) {
+	st := openTestStore(t)
+	t0 := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
+
+	statuses, err := st.MachineStatuses()
+	if err != nil || len(statuses) != 0 {
+		t.Fatalf("empty store: %v, %v", statuses, err)
+	}
+	for _, c := range []struct {
+		machine string
+		at      time.Time
+		data    bool
+	}{
+		{"office", t0, true},
+		{"office", t0.Add(time.Hour), false},   // seen later, nothing new
+		{"office", t0.Add(-time.Hour), true},   // an older report does not go back
+		{"home", t0.Add(2 * time.Hour), false}, // seen, never sent data
+	} {
+		if err := st.TouchMachine(c.machine, c.at, c.data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	statuses, err = st.MachineStatuses()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := statuses["office"]; !s.LastSeen.Equal(t0.Add(time.Hour)) || !s.LastData.Equal(t0) {
+		t.Errorf("office = %+v, want seen %s, data %s", s, t0.Add(time.Hour), t0)
+	}
+	if s := statuses["home"]; !s.LastSeen.Equal(t0.Add(2*time.Hour)) || !s.LastData.IsZero() {
+		t.Errorf("home = %+v, want seen without data", s)
+	}
+}

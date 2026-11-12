@@ -147,3 +147,67 @@ func (s *Store) pruneMachines(cutoff string) (int64, error) {
 	}
 	return res.RowsAffected()
 }
+
+// MachineStatus is when a machine's agent last contacted the server, and
+// when it last sent new session data (multi-machine mode).
+type MachineStatus struct {
+	LastSeen time.Time
+	LastData time.Time // zero when no data was received
+}
+
+func migrateMachineStatus(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS machine_status (
+			machine TEXT PRIMARY KEY,
+			last_seen INTEGER NOT NULL DEFAULT 0,
+			last_data INTEGER NOT NULL DEFAULT 0
+		);
+	`)
+	return err
+}
+
+// TouchMachine records that a machine's agent contacted the server at at,
+// and sent new session data when gotData is set. Times only move forward.
+func (s *Store) TouchMachine(machine string, at time.Time, gotData bool) error {
+	data := int64(0)
+	if gotData {
+		data = at.UnixNano()
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO machine_status (machine, last_seen, last_data) VALUES (?, ?, ?)
+		ON CONFLICT(machine) DO UPDATE SET
+			last_seen = MAX(last_seen, excluded.last_seen),
+			last_data = MAX(last_data, excluded.last_data)
+	`, machine, at.UnixNano(), data)
+	if err != nil {
+		return fmt.Errorf("recording status of machine %s: %w", machine, err)
+	}
+	return nil
+}
+
+// MachineStatuses returns the recorded status of every machine, keyed by
+// the name its agent sends.
+func (s *Store) MachineStatuses() (map[string]MachineStatus, error) {
+	rows, err := s.db.Query("SELECT machine, last_seen, last_data FROM machine_status")
+	if err != nil {
+		return nil, fmt.Errorf("querying machine status: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]MachineStatus)
+	for rows.Next() {
+		var machine string
+		var seen, data int64
+		if err := rows.Scan(&machine, &seen, &data); err != nil {
+			return nil, fmt.Errorf("scanning machine status: %w", err)
+		}
+		st := MachineStatus{LastSeen: time.Unix(0, seen)}
+		if data > 0 {
+			st.LastData = time.Unix(0, data)
+		}
+		out[machine] = st
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating machine status: %w", err)
+	}
+	return out, nil
+}

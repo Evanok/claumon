@@ -19,7 +19,7 @@ import (
 // wanted; any agent with valid credentials provides it.
 //
 //	GET  /api/ingest?kind=usage   -> {"due": bool}: should this agent fetch now?
-//	                                 (claumon agent asks every 30 seconds)
+//	     X-Claumon-Machine           (claumon agent asks every 30 seconds)
 //	POST /api/ingest?kind=usage   body: the usage API response, as is
 //	     X-Claumon-Machine, X-Claumon-Fetched-At (unix nanoseconds),
 //	     X-Claumon-Subscription, X-Claumon-Rate-Limit-Tier
@@ -66,6 +66,7 @@ func (rc *Receiver) serveUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	rc.seen(r.Header.Get(HeaderMachine), false)
 	switch r.Method {
 	case http.MethodGet:
 		json.NewEncoder(w).Encode(map[string]bool{"due": rc.usage.UsageDue(time.Now())})
@@ -142,7 +143,7 @@ func (a *Agent) syncUsage(ctx context.Context, fetch UsageFetcher) (bool, error)
 	var due struct {
 		Due bool `json:"due"`
 	}
-	if err := a.usageRequest(ctx, http.MethodGet, nil, nil, &due); err != nil {
+	if err := a.usageRequest(ctx, http.MethodGet, nil, map[string]string{HeaderMachine: a.Machine}, &due); err != nil {
 		return false, err
 	}
 	if !due.Due {

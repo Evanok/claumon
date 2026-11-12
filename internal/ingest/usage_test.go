@@ -108,3 +108,35 @@ func TestUsageRoutes(t *testing.T) {
 		}
 	}
 }
+
+// trackerLog records the contacts reported by a receiver.
+type trackerLog struct {
+	mu       sync.Mutex
+	contacts []string
+}
+
+func (l *trackerLog) MachineSeen(machine string, _ time.Time, gotData bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.contacts = append(l.contacts, machine+"|"+map[bool]string{true: "data", false: "seen"}[gotData])
+}
+
+func TestReceiverReportsContacts(t *testing.T) {
+	log := &trackerLog{}
+	rc := NewReceiver(t.TempDir(), []string{"tok"}, &memOffsets{})
+	rc.SetUsageSink(&fakeSink{})
+	rc.SetMachineTracker(log)
+
+	send(t, rc, chunkReq{token: "tok", machine: "laptop", path: "projects/-p/s.jsonl", end: 2, body: "a\n"})
+	send(t, rc, chunkReq{token: "tok", machine: "laptop", path: "projects/-p/s.jsonl", offset: 2, end: 2}) // empty check
+	send(t, rc, chunkReq{token: "bad", machine: "intruder", path: "projects/-p/s.jsonl", end: 2, body: "a\n"})
+	req := httptest.NewRequest("GET", "/api/ingest?kind=usage", nil)
+	req.Header.Set("Authorization", "Bearer tok")
+	req.Header.Set(HeaderMachine, "home")
+	rc.ServeHTTP(httptest.NewRecorder(), req)
+
+	want := "laptop|data,laptop|seen,home|seen"
+	if got := strings.Join(log.contacts, ","); got != want {
+		t.Errorf("contacts = %s, want %s", got, want)
+	}
+}
